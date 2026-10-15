@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Polly Alt</title>
+    <style>
+      :root {
+        --polly-blue: #2271b1;
+        --polly-blue-hover: #135e96;
+        --polly-green: #088908;
+        --polly-green-dark: #4a9c5d;
+        --polly-red: #d63638;
+        --polly-bg-gray: #f6f7f7;
+        --polly-border: #dcdcde;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-size: 13px;
+        color: #2c3338;
+        background: #ffffff;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      .polly-top-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--polly-border);
+        margin-bottom: 12px;
+        flex-shrink: 0;
+      }
+      .polly-title {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--polly-blue);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .polly-nav-btn {
+        background: none;
+        border: 1px solid var(--polly-border);
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+        color: #50575e;
+      }
+      .polly-nav-btn:hover { background: var(--polly-bg-gray); color: #1d2327; }
+
+      .polly-content {
+        flex: 1;
+        overflow-y: auto;
+        padding-right: 2px;
+      }
+
+      .polly-empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        height: 80%;
+        color: #646970;
+        gap: 12px;
+        padding: 20px;
+      }
+      .polly-empty-icon { font-size: 40px; }
+
+      .polly-stadium-container {
+        margin: -14px -14px 14px -14px;
+        background: #111111;
+        max-height: 200px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        border-bottom: 1px solid var(--polly-border);
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        flex-shrink: 0;
+      }
+      .polly-stadium-container img {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+
+      .polly-context-badge-box {
+        background: #f0f6fc;
+        border-left: 3px solid var(--polly-blue);
+        padding: 8px 10px;
+        border-radius: 4px;
+        margin-bottom: 12px;
+        font-size: 11px;
+        line-height: 1.4;
+      }
+      .polly-context-badge-box strong { color: #1d2327; }
+
+      .polly-functional-badge {
+        background: #eef6fc;
+        border: 1px solid #c5dff5;
+        border-left: 4px solid var(--polly-blue);
+        padding: 8px 10px;
+        border-radius: 4px;
+        margin-bottom: 12px;
+        font-size: 11px;
+      }
+      .polly-functional-title {
+        font-weight: 700;
+        color: var(--polly-blue);
+        text-transform: uppercase;
+        margin-bottom: 3px;
+      }
+
+      .polly-btn-primary {
+        width: 100%;
+        padding: 10px 14px;
+        background: var(--polly-blue);
+        border: 1px solid var(--polly-blue);
+        color: #ffffff;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 12px;
+        cursor: pointer;
+        transition: background 0.1s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+      .polly-btn-primary:hover { background: var(--polly-blue-hover); }
+      .polly-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+      .polly-tip-rotator {
+        margin-top: 14px;
+        padding: 12px 14px;
+        background: #f6faf0;
+        border-left: 4px solid var(--polly-green);
+        border-radius: 4px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #2c3338;
+        animation: fadeIn 0.3s ease;
+      }
+
+      .polly-choice-item {
+        position: relative;
+        margin-top: 12px;
+        border: 1px solid var(--polly-border);
+        border-radius: 6px;
+        background: #ffffff;
+        transition: border-color 0.15s;
+      }
+      .polly-choice-item:hover { border-color: var(--polly-blue); }
+
+      .polly-choice-select-btn {
+        display: block;
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        border: none;
+        padding: 12px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .polly-choice-tag {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 3px;
+      }
+      .polly-tag-ai { color: var(--polly-blue); background: #f0f6fc; }
+      .polly-tag-original { color: #646970; background: var(--polly-bg-gray); }
+      .polly-tag-destination { color: #0b4d75; background: #e7f3fb; border: 1px solid #72aee6; }
+
+      .polly-choice-content {
+        font-size: 13px;
+        line-height: 1.4;
+        color: #1d2327;
+        margin-bottom: 8px;
+      }
+
+      .polly-choice-char-count {
+        font-size: 11px;
+        font-weight: 600;
+        color: #646970;
+      }
+      .over-limit { color: var(--polly-red); }
+
+      .polly-choice-explanation {
+        margin-top: 8px;
+        padding: 8px 10px;
+        background: #f0f6fb;
+        border-radius: 4px;
+        border-left: 3px solid var(--polly-blue);
+        font-size: 11px;
+        color: #3c434a;
+        font-style: italic;
+        line-height: 1.4;
+      }
+
+      .polly-card-actions {
+        display: flex;
+        gap: 6px;
+        padding: 0 12px 10px 12px;
+      }
+      .polly-card-btn {
+        background: var(--polly-bg-gray);
+        border: 1px solid var(--polly-border);
+        border-radius: 3px;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 3px 8px;
+        cursor: pointer;
+        color: #3c434a;
+      }
+      .polly-card-btn:hover { background: #ffffff; border-color: #8c8f94; }
+
+      .polly-decorative-wrap {
+        margin: 14px 0 6px 0;
+        padding: 10px 12px;
+        background: var(--polly-bg-gray);
+        border: 1px solid var(--polly-border);
+        border-radius: 4px;
+      }
+      .polly-decorative-wrap label {
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .decorative-notice {
+        font-size: 11px;
+        color: #646970;
+        font-style: italic;
+        margin-top: 4px;
+        display: block;
+      }
+
+      .polly-standards-text {
+        font-size: 11px;
+        line-height: 1.4;
+        color: #646970;
+        border-left: 3px solid var(--polly-green);
+        padding-left: 8px;
+        margin: 12px 0;
+      }
+
+      .polly-choice-textarea {
+        width: calc(100% - 24px);
+        margin: 0 12px 10px 12px;
+        padding: 8px;
+        font-family: inherit;
+        font-size: 12px;
+        line-height: 1.4;
+        border: 1px solid var(--polly-blue);
+        border-radius: 4px;
+        min-height: 60px;
+      }
+
+      .polly-settings-view { display: none; }
+      .polly-form-group {
+        margin-bottom: 14px;
+      }
+      .polly-form-group label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .polly-form-group input[type="text"],
+      .polly-form-group input[type="password"],
+      .polly-form-group select {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid var(--polly-border);
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: inherit;
+      }
+      .polly-help-text {
+        font-size: 11px;
+        color: #646970;
+        margin-top: 4px;
+        line-height: 1.4;
+      }
+      .polly-help-text a { color: var(--polly-blue); }
+
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+    </style>
+  </head>
+  <body>
+
+    <div class="polly-top-bar">
+      <div class="polly-title">🦜 Polly Alt</div>
+      <div style="display: flex; gap: 6px;">
+        <button type="button" id="polly-toggle-badges-btn" class="polly-nav-btn">👁️ Badges</button>
+        <button type="button" id="polly-toggle-settings" class="polly-nav-btn">⚙️ Settings</button>
+      </div>
+    </div>
+
+    <div id="polly-settings-panel" class="polly-content polly-settings-view">
+      <div class="polly-form-group">
+        <label for="polly-api-key">Gemini API Key (BYOK)</label>
+        <input type="password" id="polly-api-key" placeholder="AIzaSy...">
+        <p class="polly-help-text">
+          Get your free key at <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>.
+        </p>
+      </div>
+
+      <div class="polly-form-group">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <label for="polly-model-select" style="margin-bottom: 0;">AI Model</label>
+          <button type="button" id="polly-refresh-models-btn" class="polly-nav-btn" style="padding: 2px 6px; font-size: 11px;">🔄 Refresh List</button>
+        </div>
+        <select id="polly-model-select" disabled>
+          <option value="">— Enter API Key First —</option>
+        </select>
+        <p id="polly-model-status" class="polly-help-text">Live models will load automatically from your key.</p>
+      </div>
+
+      <div class="polly-form-group">
+        <label for="polly-choices-count">Suggestions to Offer</label>
+        <select id="polly-choices-count">
+          <option value="1">1 Option</option>
+          <option value="2">2 Options</option>
+          <option value="3" selected>3 Options</option>
+          <option value="4">4 Options</option>
+        </select>
+      </div>
+
+      <div class="polly-form-group">
+        <label>
+          <input type="checkbox" id="polly-include-expl" checked>
+          Include educational rationale
+        </label>
+      </div>
+
+      <button type="button" id="polly-save-settings-btn" class="polly-btn-primary">Save Settings</button>
+    </div>
+
+    <div id="polly-main-panel" class="polly-content">
+      
+      <div id="polly-empty-view" class="polly-empty-state">
+        <div class="polly-empty-icon">🖼️</div>
+        <p>Select an image layer or component on your canvas to wake Polly.</p>
+      </div>
+
+      <div id="polly-active-view" style="display: none;">
+        <div id="polly-stadium-container" class="polly-stadium-container" style="display: none;">
+          <img id="polly-stadium-img" src="" alt="Selected image preview">
+        </div>
+
+        <div id="polly-context-preview"></div>
+
+        <div id="polly-handoff-box" style="display: none; margin-bottom: 14px; padding: 12px; background: #f0f6fc; border: 1px solid #c5dff5; border-radius: 6px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-weight: 700; font-size: 11px; color: var(--polly-blue); text-transform: uppercase;">Active Alt Text</span>
+            <span id="polly-saved-char-count" style="font-size: 11px; font-weight: 600; color: #646970;"></span>
+          </div>
+          <div id="polly-saved-text" style="font-size: 13px; line-height: 1.4; color: #1d2327; margin-bottom: 10px; word-break: break-word;"></div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button type="button" id="polly-copy-text-btn" class="polly-card-btn" style="flex: 1; padding: 6px;">📋 Copy Alt Text</button>
+            <button type="button" id="polly-copy-html-btn" class="polly-card-btn" style="flex: 1; padding: 6px;">&lt;/&gt; Copy &lt;img&gt; Tag</button>
+            <button type="button" id="polly-pin-margin-btn" class="polly-card-btn" style="width: 100%; margin-top: 4px; padding: 6px; background: #f5faf0; border-color: #088908; color: #088908;">📌 Pin Alt Card to Margin</button>
+          </div>
+        </div>
+
+        <button type="button" id="polly-generate-btn" class="polly-btn-primary">
+          Preview and Generate
+        </button>
+
+        <div class="polly-standards-text">
+          Alt text describes what sighted visitors see. Aim for around 125 characters. Avoid starting with "image of".
+        </div>
+
+        <div id="polly-tip-box" class="polly-tip-rotator" style="display: none;">
+          <span id="polly-tip-msg"></span>
+        </div>
+
+        <div id="polly-options-container"></div>
+
+        <div class="polly-decorative-wrap">
+          <label for="polly-deco-check">
+            <input type="checkbox" id="polly-deco-check">
+            This image is decorative
+          </label>
+          <span class="decorative-notice">Screen readers will skip this element. Alt text will be cleared.</span>
+        </div>
+      </div>
+
+    </div>
+
+    <script>
+      const ALT_TEXT_TIPS = [
+        'Keep it snappy — aim for about 20% shorter than a standard text message, roughly 125 characters or less.',
+        'Skip "image of" or "photo of" — screen readers already announce that it\'s an image.',
+        'Lead with the main subject first in case someone moves on before the description finishes.',
+        'Describe what\'s actually visible — save interpretation and assumptions for captions.',
+        'If there\'s text inside the image, decide whether it needs to be transcribed into the alt text.',
+        'Purely decorative? If it adds no understanding, there\'s a checkbox below — no alt text needed at all.',
+        'Avoid repeating words already in the surrounding text — alt text should add visual information.',
+        'Keep sentences plain and simple — screen readers read alt text aloud, word for word.'
+      ];
+
+      let currentSettings = {
+        apiKey: '',
+        model: 'gemini-2.5-flash',
+        choiceCount: 3,
+        includeExplanation: true
+      };
+
+      let currentNode = null;
+      let tipTimer = null;
+
+      let badgesVisible = true;
+      document.getElementById('polly-toggle-badges-btn').onclick = () => {
+        badgesVisible = !badgesVisible;
+        const btn = document.getElementById('polly-toggle-badges-btn');
+        btn.textContent = badgesVisible ? '👁️ Badges' : '🙈 Badges Hidden';
+        btn.style.color = badgesVisible ? '#50575e' : 'var(--polly-blue)';
+        parent.postMessage({ pluginMessage: { type: 'TOGGLE_BADGES', show: badgesVisible } }, '*');
+      };
+
+      const settingsPanel = document.getElementById('polly-settings-panel');
+      const mainPanel = document.getElementById('polly-main-panel');
+      const toggleSettingsBtn = document.getElementById('polly-toggle-settings');
+
+      toggleSettingsBtn.onclick = () => {
+        const isSettingsOpen = settingsPanel.style.display === 'block';
+        settingsPanel.style.display = isSettingsOpen ? 'none' : 'block';
+        mainPanel.style.display = isSettingsOpen ? 'block' : 'none';
+        toggleSettingsBtn.textContent = isSettingsOpen ? '⚙️ Settings' : '← Back';
+      };
+
+      document.getElementById('polly-save-settings-btn').onclick = () => {
+        currentSettings.apiKey = document.getElementById('polly-api-key').value.trim();
+        currentSettings.model = document.getElementById('polly-model-select').value;
+        currentSettings.choiceCount = parseInt(document.getElementById('polly-choices-count').value, 10);
+        currentSettings.includeExplanation = document.getElementById('polly-include-expl').checked;
+
+        parent.postMessage({ pluginMessage: { type: 'SAVE_SETTINGS', data: currentSettings } }, '*');
+        toggleSettingsBtn.click();
+      };
+
+      async function fetchAvailableModels(apiKey) {
+        if (!apiKey) return [];
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`);
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error?.message || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.models || !Array.isArray(data.models)) return [];
+
+        const validModels = [];
+        for (const m of data.models) {
+          if (!m.name || !m.supportedGenerationMethods) continue;
+          if (!m.supportedGenerationMethods.includes('generateContent')) continue;
+
+          const cleanName = m.name.replace(/^models\//, '');
+
+          if (
+            cleanName.includes('embedding') ||
+            cleanName.includes('text') ||
+            cleanName.includes('aqa') ||
+            cleanName.includes('tuning') ||
+            cleanName.includes('imagen')
+          ) {
+            continue;
+          }
+
+          const displayName = m.displayName || cleanName;
+          validModels.push({ id: cleanName, name: displayName });
+        }
+
+        return validModels;
+      }
+
+      async function populateModelDropdown(apiKey, targetModelId = null) {
+        const select = document.getElementById('polly-model-select');
+        const statusEl = document.getElementById('polly-model-status');
+
+        if (!apiKey) {
+          select.innerHTML = '<option value="">— Enter API Key First —</option>';
+          select.disabled = true;
+          statusEl.textContent = 'Add your API key above to load available models.';
+          return;
+        }
+
+        select.disabled = true;
+        select.innerHTML = '<option value="">Fetching live models from Google...</option>';
+        statusEl.textContent = 'Contacting Google AI Studio...';
+
+        try {
+          const models = await fetchAvailableModels(apiKey);
+          if (models.length === 0) {
+            select.innerHTML = '<option value="">No compatible multimodal models found</option>';
+            statusEl.textContent = 'No models available for this key.';
+            return;
+          }
+
+          select.innerHTML = '';
+
+          let recommendedId = '';
+          for (const m of models) {
+            if (m.id.includes('-flash')) {
+              if (!recommendedId || m.id.localeCompare(recommendedId, undefined, { numeric: true }) > 0) {
+                recommendedId = m.id;
+              }
+            }
+          }
+          if (!recommendedId) recommendedId = models[0].id;
+
+          models.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.id;
+            const isRec = m.id === recommendedId;
+            opt.textContent = isRec ? `${m.name} (Recommended)` : m.name;
+            select.appendChild(opt);
+          });
+
+          if (targetModelId && models.some(m => m.id === targetModelId)) {
+            select.value = targetModelId;
+          } else {
+            select.value = recommendedId;
+          }
+
+          select.disabled = false;
+          statusEl.textContent = `Loaded ${models.length} active models from your account.`;
+        } catch (err) {
+          select.innerHTML = `<option value="">Error loading models</option>`;
+          statusEl.textContent = `Could not fetch models: ${err.message}`;
+          select.disabled = false;
+        }
+      }
+
+      document.getElementById('polly-api-key').addEventListener('blur', (e) => {
+        const key = e.target.value.trim();
+        if (key) {
+          populateModelDropdown(key, document.getElementById('polly-model-select').value);
+        }
+      });
+
+      document.getElementById('polly-refresh-models-btn').onclick = () => {
+        const key = document.getElementById('polly-api-key').value.trim();
+        populateModelDropdown(key, document.getElementById('polly-model-select').value);
+      };
+
+      function startTipRotator() {
+        const box = document.getElementById('polly-tip-box');
+        const msg = document.getElementById('polly-tip-msg');
+        box.style.display = 'block';
+
+        let tipIdx = Math.floor(Math.random() * ALT_TEXT_TIPS.length);
+        msg.textContent = ALT_TEXT_TIPS[tipIdx];
+
+        clearInterval(tipTimer);
+        tipTimer = setInterval(() => {
+          tipIdx = (tipIdx + 1) % ALT_TEXT_TIPS.length;
+          msg.textContent = ALT_TEXT_TIPS[tipIdx];
+        }, 7000);
+      }
+
+      function stopTipRotator() {
+        clearInterval(tipTimer);
+        document.getElementById('polly-tip-box').style.display = 'none';
+      }
+
+      function renderContextPreview(ctx) {
+        const box = document.getElementById('polly-context-preview');
+        box.innerHTML = '';
+        if (!ctx) return;
+
+        if (ctx.isFunctional) {
+          const dest = ctx.destinationTitle || ctx.destination || 'Interactive Target';
+          const role = ctx.functionalRole === 'button' ? 'Action Button' : 'Link Destination';
+          box.innerHTML += `
+            <div class="polly-functional-badge">
+              <div class="polly-functional-title">🔗 ${role}</div>
+              <div>Functions as an interactive element targeting: <strong>${dest}</strong>.</div>
+            </div>
+          `;
+        }
+
+        if (ctx.frameName || ctx.paragraphsBefore || ctx.paragraphsAfter) {
+          let html = '<div class="polly-context-badge-box">';
+          if (ctx.frameName) html += `<div><strong>Canvas Context:</strong> ${ctx.frameName}</div>`;
+          if (ctx.paragraphsBefore) html += `<div><strong>Preceding Copy:</strong> "${ctx.paragraphsBefore}"</div>`;
+          if (ctx.paragraphsAfter) html += `<div><strong>Following Copy:</strong> "${ctx.paragraphsAfter}"</div>`;
+          html += '</div>';
+          box.innerHTML += html;
+        }
+      }
+
+      document.getElementById('polly-generate-btn').onclick = () => {
+        if (!currentSettings.apiKey) {
+          alert('Please add your free Gemini API Key in Settings first.');
+          toggleSettingsBtn.click();
+          return;
+        }
+        const genBtn = document.getElementById('polly-generate-btn');
+        genBtn.textContent = 'Squawking with Gemini...';
+        genBtn.disabled = true;
+        startTipRotator();
+
+        parent.postMessage({ pluginMessage: { type: 'REQUEST_IMAGE_DATA' } }, '*');
+      };
+
+      document.getElementById('polly-deco-check').onchange = (e) => {
+        if (e.target.checked) {
+          parent.postMessage({
+            pluginMessage: {
+              type: 'APPLY_ALT_TEXT',
+              data: { altText: '', isDecorative: true, explanation: '' }
+            }
+          }, '*');
+        }
+      };
+
+      function renderChoiceCards(choices, originalText) {
+        const container = document.getElementById('polly-options-container');
+        container.innerHTML = '';
+
+        const options = [];
+        if (originalText) {
+          options.push({ alt: originalText, label: 'ORIGINAL', explanation: 'Your current layer description.' });
+        }
+
+        choices.forEach(c => {
+          options.push({
+            ...c,
+            label: currentNode.context.isFunctional ? 'DESTINATION' : 'AI OPTION'
+          });
+        });
+
+        options.forEach(opt => {
+          const card = document.createElement('div');
+          card.className = 'polly-choice-item';
+
+          const isOver = opt.alt.length > 125;
+          const tagClass = opt.label === 'DESTINATION' ? 'polly-tag-destination' : (opt.label === 'ORIGINAL' ? 'polly-tag-original' : 'polly-tag-ai');
+
+          card.innerHTML = `
+            <button type="button" class="polly-choice-select-btn">
+              <span class="polly-choice-tag ${tagClass}">${opt.label}</span>
+              <div class="polly-choice-content">${opt.alt}</div>
+              <div class="polly-choice-char-count ${isOver ? 'over-limit' : ''}">${opt.alt.length} characters</div>
+              ${opt.explanation ? `<div class="polly-choice-explanation">${opt.explanation}</div>` : ''}
+            </button>
+            <div class="polly-card-actions">
+              ${isOver ? `<button type="button" class="polly-card-btn polly-fit-btn">Make it Fit</button>` : ''}
+              <button type="button" class="polly-card-btn polly-edit-btn">Edit</button>
+            </div>
+          `;
+
+          card.querySelector('.polly-choice-select-btn').onclick = () => {
+            const textarea = card.querySelector('.polly-choice-textarea');
+            const finalVal = textarea ? textarea.value : opt.alt;
+
+            currentNode.existingAlt = finalVal;
+
+            const handoffBox = document.getElementById('polly-handoff-box');
+            handoffBox.style.display = 'block';
+            document.getElementById('polly-saved-text').textContent = finalVal;
+            document.getElementById('polly-saved-char-count').textContent = `${finalVal.length} characters`;
+
+            document.getElementById('polly-copy-text-btn').onclick = () => {
+              navigator.clipboard.writeText(finalVal);
+              const btn = document.getElementById('polly-copy-text-btn');
+              btn.textContent = '✅ Copied!';
+              setTimeout(() => { btn.textContent = '📋 Copy Alt Text'; }, 1500);
+            };
+
+            document.getElementById('polly-copy-html-btn').onclick = () => {
+              const cleanName = (currentNode.nodeName || 'image').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+              const snippet = `<img src="${cleanName}.jpg" alt="${finalVal}" />`;
+              navigator.clipboard.writeText(snippet);
+              const btn = document.getElementById('polly-copy-html-btn');
+              btn.textContent = '✅ Tag Copied!';
+              setTimeout(() => { btn.textContent = '</> Copy <img> Tag'; }, 1500);
+            };
+
+            document.getElementById('polly-pin-margin-btn').onclick = () => {
+              parent.postMessage({ pluginMessage: { type: 'PIN_MARGIN_CALLOUT' } }, '*');
+            };
+
+            const genBtn = document.getElementById('polly-generate-btn');
+            genBtn.textContent = 'Preview and Refine';
+            document.getElementById('polly-main-panel').scrollTo({ top: 0, behavior: 'smooth' });
+
+            parent.postMessage({
+              pluginMessage: {
+                type: 'APPLY_ALT_TEXT',
+                data: { altText: finalVal, isDecorative: false, explanation: opt.explanation || '' }
+              }
+            }, '*');
+          };
+
+          const fitBtn = card.querySelector('.polly-fit-btn');
+          if (fitBtn) {
+            fitBtn.onclick = async (e) => {
+              e.stopPropagation();
+              fitBtn.textContent = 'Fitting...';
+              fitBtn.disabled = true;
+
+              const compressed = await compressAltText(opt.alt);
+              if (compressed) {
+                opt.alt = compressed;
+                card.querySelector('.polly-choice-content').textContent = compressed;
+                const counter = card.querySelector('.polly-choice-char-count');
+                counter.textContent = `${compressed.length} characters`;
+                counter.classList.toggle('over-limit', compressed.length > 125);
+                if (compressed.length <= 125) fitBtn.remove();
+              } else {
+                fitBtn.textContent = 'Make it Fit';
+                fitBtn.disabled = false;
+              }
+            };
+          }
+
+          const editBtn = card.querySelector('.polly-edit-btn');
+          editBtn.onclick = (e) => {
+            e.stopPropagation();
+            let textarea = card.querySelector('.polly-choice-textarea');
+            if (!textarea) {
+              textarea = document.createElement('textarea');
+              textarea.className = 'polly-choice-textarea';
+              textarea.value = opt.alt;
+              card.appendChild(textarea);
+              editBtn.textContent = 'Apply';
+              textarea.oninput = () => {
+                const counter = card.querySelector('.polly-choice-char-count');
+                counter.textContent = `${textarea.value.length} characters`;
+                counter.classList.toggle('over-limit', textarea.value.length > 125);
+              };
+              textarea.focus();
+            } else {
+              card.querySelector('.polly-choice-select-btn').click();
+            }
+          };
+
+          container.appendChild(card);
+        });
+      }
+
+      async function compressAltText(textToCompress) {
+        const prompt = `You are an accessibility expert. Compress the following alternative text so it fits perfectly under a strict 125-character budget. It must remain descriptive, active-voice, and retain the primary visual focus. Return ONLY the refined alt text string under 125 characters, with no extra commentary or markdown.\n\nText to compress: "${textToCompress}"`;
+        try {
+          const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentSettings.model}:generateContent?key=${encodeURIComponent(currentSettings.apiKey)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }]
+            })
+          });
+          const resData = await resp.json();
+          let refined = resData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+          return refined.replace(/^["']|["']$/g, '').trim();
+        } catch (err) {
+          alert('Make it Fit error: ' + err.message);
+          return null;
+        }
+      }
+
+      async function generatePollyAlt(imageData) {
+        const ctx = currentNode.context;
+        let contextBlock = '';
+
+        if (ctx && (ctx.paragraphsBefore || ctx.paragraphsAfter || ctx.frameName)) {
+          contextBlock = `SURROUNDING DESIGN CONTEXT:\n` +
+            (ctx.frameName ? `Page/Screen Name: "${ctx.frameName}"\n` : '') +
+            (ctx.paragraphsBefore ? `Before the image: "${ctx.paragraphsBefore}"\n` : '') +
+            (ctx.paragraphsAfter ? `After the image: "${ctx.paragraphsAfter}"\n` : '') +
+            `\nUse this surrounding text to decide which visible details matter most. Don't restate facts the copy already provides, but let it steer which visual elements you foreground. At least the first variation should connect what's visible with the surrounding copy.\n\n`;
+        }
+
+        let prompt = '';
+        if (ctx && ctx.isFunctional) {
+          const role = ctx.functionalRole || 'link';
+          const dest = ctx.destinationTitle ? `"${ctx.destinationTitle}" (Target: ${ctx.destination})` : (ctx.destination || 'Action Target');
+          prompt = `You are an accessibility expert writing functional alternative text for an image that acts as a ${role}.\n\n` +
+            `FUNCTIONAL IMAGE CONTEXT:\n- Role: ${role}\n- Target/Destination: ${dest}\n${contextBlock}` +
+            `Generate exactly ${currentSettings.choiceCount} concise alt text options following these strict rules:\n` +
+            `- Stating the destination or initiated action is mandatory. Describe WHERE the link goes or WHAT the button does, NOT what the image looks like.\n` +
+            `- NEVER start with words like "link to", "go to", "click here", "image of". Screen readers announce the role automatically.\n` +
+            `- Keep each option concise (under 125 characters), ideally 2 to 6 words.\n` +
+            `- Return valid JSON array of objects with keys: "alt", "focus", "explanation".\n` +
+            `Return ONLY the JSON array.`;
+        } else {
+          prompt = `You are an accessibility expert writing alt text for a web or mobile image. ` +
+            `Generate exactly ${currentSettings.choiceCount} distinct alt text variations following these rules:\n\n` +
+            `- Each alt text must be between 100 and 125 characters.\n` +
+            `- Do NOT begin with "image of", "photo of", or similar.\n` +
+            `- Write in plain language, present tense, active voice.\n` +
+            `- STRICTLY VISUAL: Describe only what is physically visible. Do NOT include narrative commentary, metaphorical interpretations, or explain how the image relates to the surrounding text within the "alt" field itself.\n` +
+            `- If the image relates to the surrounding text, that connection belongs ONLY in the "explanation" field.\n\n` +
+            contextBlock +
+            `VARIATIONS:\nForeground a DIFFERENT visual element in each variation as the opening focus.\n\n` +
+            `Return ONLY a valid JSON array of objects with keys:\n` +
+            `- "alt": (string) 100-125 characters. Purely visual description.\n` +
+            `- "focus": (string) Short noun phrase naming the foregrounded element.\n` +
+            `- "explanation": (string) One sentence explaining why this framing provides useful context.\n\n` +
+            `Do not include any text outside the JSON array.`;
+        }
+
+        const payload = {
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: imageData.mimeType, data: imageData.base64 } }
+            ]
+          }],
+          generationConfig: { responseMimeType: 'application/json' }
+        };
+
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentSettings.model}:generateContent?key=${encodeURIComponent(currentSettings.apiKey)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          const data = await response.json();
+          if (data.error) throw new Error(data.error.message);
+
+          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text
+            .replace(/^```json\s*/i, '')
+            .replace(/^```\s*/i, '')
+            .replace(/```\s*$/i, '')
+            .trim();
+
+          const choices = JSON.parse(rawText).map(c => ({
+            alt: c.alt || '',
+            focus: c.focus || '',
+            explanation: currentSettings.includeExplanation
+              ? (c.focus ? `Focus: ${c.focus}. ${c.explanation || ''}`.trim() : c.explanation)
+              : null
+          }));
+
+          renderChoiceCards(choices, currentNode.existingAlt);
+        } catch (err) {
+          alert('🦜 Polly squawked with an error: ' + err.message);
+        } finally {
+          stopTipRotator();
+          const genBtn = document.getElementById('polly-generate-btn');
+          genBtn.textContent = currentNode.existingAlt ? 'Preview and Refine' : 'Preview and Generate';
+          genBtn.disabled = false;
+        }
+      }
+
+      window.onmessage = (event) => {
+        const msg = event.data.pluginMessage;
+        if (!msg) return;
+
+        if (msg.type === 'SETTINGS_LOADED') {
+          currentSettings = msg.data;
+          document.getElementById('polly-api-key').value = currentSettings.apiKey || '';
+          document.getElementById('polly-choices-count').value = currentSettings.choiceCount || 3;
+          document.getElementById('polly-include-expl').checked = currentSettings.includeExplanation !== false;
+
+          if (currentSettings.apiKey) {
+            populateModelDropdown(currentSettings.apiKey, currentSettings.model);
+          } else {
+            populateModelDropdown('');
+          }
+        }
+
+        if (msg.type === 'SELECTION_CLEARED') {
+          currentNode = null;
+          document.getElementById('polly-empty-view').style.display = 'flex';
+          document.getElementById('polly-active-view').style.display = 'none';
+          document.getElementById('polly-stadium-container').style.display = 'none';
+          document.getElementById('polly-stadium-img').src = '';
+        }
+
+        if (msg.type === 'SELECTION_READY') {
+          currentNode = msg.data;
+          document.getElementById('polly-empty-view').style.display = 'none';
+          document.getElementById('polly-active-view').style.display = 'block';
+
+          const stadiumBox = document.getElementById('polly-stadium-container');
+          const stadiumImg = document.getElementById('polly-stadium-img');
+          if (currentNode.previewBase64) {
+            stadiumImg.src = `data:image/jpeg;base64,${currentNode.previewBase64}`;
+            stadiumBox.style.display = 'flex';
+          } else {
+            stadiumBox.style.display = 'none';
+          }
+
+          const genBtn = document.getElementById('polly-generate-btn');
+          genBtn.textContent = currentNode.existingAlt ? 'Preview and Refine' : 'Preview and Generate';
+
+          document.getElementById('polly-deco-check').checked = currentNode.isDecorative;
+          renderContextPreview(currentNode.context);
+
+          const handoffBox = document.getElementById('polly-handoff-box');
+          if (currentNode.existingAlt && !currentNode.isDecorative) {
+            handoffBox.style.display = 'block';
+            document.getElementById('polly-saved-text').textContent = currentNode.existingAlt;
+            document.getElementById('polly-saved-char-count').textContent = `${currentNode.existingAlt.length} characters`;
+
+            document.getElementById('polly-copy-text-btn').onclick = () => {
+              navigator.clipboard.writeText(currentNode.existingAlt);
+              const btn = document.getElementById('polly-copy-text-btn');
+              btn.textContent = '✅ Copied!';
+              setTimeout(() => { btn.textContent = '📋 Copy Alt Text'; }, 1500);
+            };
+
+            document.getElementById('polly-copy-html-btn').onclick = () => {
+              const cleanName = (currentNode.nodeName || 'image').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+              const snippet = `<img src="${cleanName}.jpg" alt="${currentNode.existingAlt}" />`;
+              navigator.clipboard.writeText(snippet);
+              const btn = document.getElementById('polly-copy-html-btn');
+              btn.textContent = '✅ Tag Copied!';
+              setTimeout(() => { btn.textContent = '</> Copy <img> Tag'; }, 1500);
+            };
+
+            document.getElementById('polly-pin-margin-btn').onclick = () => {
+              parent.postMessage({ pluginMessage: { type: 'PIN_MARGIN_CALLOUT' } }, '*');
+            };
+          } else {
+            handoffBox.style.display = 'none';
+          }
+
+          if (currentNode.existingAlt && !document.querySelector('.polly-choice-item')) {
+            renderChoiceCards([], currentNode.existingAlt);
+          }
+        }
+
+        if (msg.type === 'IMAGE_DATA_READY') {
+          generatePollyAlt(msg.data);
+        }
+
+        if (msg.type === 'IMAGE_DATA_ERROR') {
+          stopTipRotator();
+          alert('Could not export image from layer: ' + msg.error);
+          const genBtn = document.getElementById('polly-generate-btn');
+          genBtn.disabled = false;
+          genBtn.textContent = 'Preview and Generate';
+        }
+      };
+
+      parent.postMessage({ pluginMessage: { type: 'INIT' } }, '*');
+    </script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "Polly Alt",
+  "id": "polly-alt",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma", "dev"],
+  "networkAccess": {
+    "allowedDomains": [
+      "https://generativelanguage.googleapis.com"
+    ],
+    "reasoning": "Polly Alt connects directly to Google Gemini AI to analyze image layers and generate accessible alt text."
+  }
+}
