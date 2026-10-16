@@ -7,6 +7,13 @@ figma.showUI(__html__, {
   themeColors: true
 });
 
+// Restore saved window dimensions
+figma.clientStorage.getAsync('polly_window_size').then(size => {
+  if (size && size.width && size.height) {
+    figma.ui.resize(size.width, size.height);
+  }
+}).catch(() => {});
+
 function uint8ArrayToBase64(bytes: Uint8Array): string {
   let binary = '';
   const len = bytes.byteLength;
@@ -241,6 +248,11 @@ figma.on('documentchange', (event) => {
 });
 
 figma.ui.onmessage = async (msg) => {
+  if (msg.type === 'RESIZE_WINDOW') {
+    figma.ui.resize(msg.width, msg.height);
+    figma.clientStorage.setAsync('polly_window_size', { width: msg.width, height: msg.height }).catch(() => {});
+  }
+
   if (msg.type === 'INIT') {
     const settings = await figma.clientStorage.getAsync('polly_settings');
     figma.ui.postMessage({
