@@ -159,6 +159,8 @@ async function sendCurrentSelection() {
   const existingAlt = node.getPluginData('polly_alt') || '';
   const isDecorative = node.getPluginData('polly_is_decorative') === 'true';
   const context = extractNodeContext(node);
+  const noteId = node.getPluginData('polly_margin_note_id');
+  const isPinned = !!noteId && !!figma.getNodeById(noteId);
 
   figma.ui.postMessage({
     type: 'SELECTION_READY',
@@ -168,6 +170,7 @@ async function sendCurrentSelection() {
       hasImage,
       existingAlt,
       isDecorative,
+      isPinned,
       context,
       previewBase64
     }
@@ -484,16 +487,9 @@ figma.ui.onmessage = async (msg) => {
     figma.notify(show ? '🦜 Alt badges visible' : '🦜 Alt badges hidden for presentation');
   }
 
-  if (msg.type === 'PIN_MARGIN_CALLOUT') {
-    const selection = figma.currentPage.selection;
-    if (selection.length === 0) return;
-
-    const node = selection[0];
+  async function pinMarginCallout(node: SceneNode) {
     const altText = node.getPluginData('polly_alt');
-    if (!altText) {
-      figma.notify('🦜 No alt text saved on this layer yet.');
-      return;
-    }
+    if (!altText) return;
 
     let rootFrame: BaseNode = node;
     while (rootFrame.parent && rootFrame.parent.type !== 'PAGE') {
@@ -627,7 +623,6 @@ figma.ui.onmessage = async (msg) => {
     drawOrUpdateLeaderLine(node, card);
 
     node.setPluginData('polly_margin_note_id', card.id);
-    figma.notify(placeOnLeft ? '🦜 Pinned alt card to the left margin!' : '🦜 Pinned alt card to the right margin!');
   }
 
   if (msg.type === 'APPLY_ALT_TEXT') {
@@ -674,10 +669,6 @@ figma.ui.onmessage = async (msg) => {
       badge.strokes = [{ type: 'SOLID', color: { r: 0.13, g: 0.44, b: 0.69 } }];
       badge.strokeWeight = 1;
 
-      if ('layoutPositioning' in badge) {
-        badge.layoutPositioning = 'ABSOLUTE';
-      }
-
       badge.setPluginData('polly_is_badge', 'true');
 
       const tagText = figma.createText();
@@ -698,6 +689,9 @@ figma.ui.onmessage = async (msg) => {
 
       if (node.parent && 'appendChild' in node.parent) {
         node.parent.appendChild(badge);
+        if ('layoutMode' in node.parent && node.parent.layoutMode !== 'NONE') {
+          badge.layoutPositioning = 'ABSOLUTE';
+        }
         badge.x = node.x;
         badge.y = node.y + node.height + 8;
       }
@@ -705,7 +699,9 @@ figma.ui.onmessage = async (msg) => {
       node.setPluginData('polly_badge_id', badge.id);
     }
 
-    figma.notify('🦜 Alt text saved to layer & added to canvas!');
+    if (!isDecorative && altText) await pinMarginCallout(node);
+
+    figma.notify('🦜 Alt text saved & pinned to the canvas!');
     sendCurrentSelection();
   }
 };

@@ -446,7 +446,7 @@
           <div style="display: flex; gap: 6px; flex-wrap: wrap;">
             <button type="button" id="polly-copy-text-btn" class="polly-card-btn" style="flex: 1; padding: 6px;">📋 Copy Alt Text</button>
             <button type="button" id="polly-copy-html-btn" class="polly-card-btn" style="flex: 1; padding: 6px;">&lt;/&gt; Copy &lt;img&gt; Tag</button>
-            <button type="button" id="polly-pin-margin-btn" class="polly-card-btn" style="width: 100%; margin-top: 4px; padding: 6px; background: #f5faf0; border-color: #088908; color: #088908;">📌 Pin Alt Card to Margin</button>
+            <div id="polly-pinned-note" style="display: none; width: 100%; margin-top: 4px; padding: 6px; text-align: center; font-size: 11px; font-weight: 600; background: #f5faf0; border: 1px solid #088908; border-radius: 3px; color: #088908;">📌 Pinned to canvas margin</div>
           </div>
         </div>
 
@@ -773,10 +773,6 @@
               setTimeout(() => { btn.textContent = '</> Copy <img> Tag'; }, 1500);
             };
 
-            document.getElementById('polly-pin-margin-btn').onclick = () => {
-              parent.postMessage({ pluginMessage: { type: 'PIN_MARGIN_CALLOUT' } }, '*');
-            };
-
             const genBtn = document.getElementById('polly-generate-btn');
             genBtn.textContent = 'Preview and Refine';
             document.getElementById('polly-main-panel').scrollTo({ top: 0, behavior: 'smooth' });
@@ -985,7 +981,7 @@
 
             const env = ctx.createGain();
             env.gain.setValueAtTime(0.0001, t);
-            env.gain.exponentialRampToValueAtTime(1, t + 0.02);
+            env.gain.exponentialRampToValueAtTime(1, t + 0.06);
             env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
 
             osc.connect(f1);
@@ -1005,7 +1001,7 @@
 
             const shaper = ctx.createWaveShaper();
             const curve = new Float32Array(256);
-            for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 6); }
+            for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 4); }
             shaper.curve = curve;
             env.connect(shaper);
             shaper.connect(master);
@@ -1089,6 +1085,7 @@
             handoffBox.style.display = 'block';
             document.getElementById('polly-saved-text').textContent = currentNode.existingAlt;
             document.getElementById('polly-saved-char-count').textContent = `${currentNode.existingAlt.length} characters`;
+            document.getElementById('polly-pinned-note').style.display = currentNode.isPinned ? 'block' : 'none';
 
             document.getElementById('polly-copy-text-btn').onclick = () => {
               navigator.clipboard.writeText(currentNode.existingAlt);
@@ -1106,9 +1103,6 @@
               setTimeout(() => { btn.textContent = '</> Copy <img> Tag'; }, 1500);
             };
 
-            document.getElementById('polly-pin-margin-btn').onclick = () => {
-              parent.postMessage({ pluginMessage: { type: 'PIN_MARGIN_CALLOUT' } }, '*');
-            };
           } else {
             handoffBox.style.display = 'none';
           }
