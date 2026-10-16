@@ -92,7 +92,41 @@
         height: auto;
         display: block;
       }
-
+      .polly-squawk-alert {
+        display: none;
+        background: #fff8e5;
+        border-left: 4px solid #dba617;
+        padding: 8px 10px;
+        border-radius: 4px;
+        margin-bottom: 12px;
+        font-size: 11px;
+        color: #614700;
+        animation: squawkPulse 0.4s ease;
+      }
+      .polly-squawk-toast {
+        display: none;
+        background: #088908;
+        color: #ffffff;
+        padding: 8px 10px;
+        border-radius: 4px;
+        margin-bottom: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .polly-squawk-toast.active {
+        display: block;
+        animation: toastPulse 1s ease-in-out 3;
+      }
+      @keyframes toastPulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(8, 137, 8, 0.6); }
+        50% { box-shadow: 0 0 0 6px rgba(8, 137, 8, 0); }
+      }
+      @keyframes squawkPulse {
+        0% { transform: scale(0.97); opacity: 0; }
+        50% { transform: scale(1.02); }
+        100% { transform: scale(1); opacity: 1; }
+      }
       .polly-context-badge-box {
         background: #f0f6fc;
         border-left: 3px solid var(--polly-blue);
@@ -138,6 +172,15 @@
       }
       .polly-btn-primary:hover { background: var(--polly-blue-hover); }
       .polly-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+      .polly-btn-primary.pulse {
+        outline: 3px solid #088908;
+        outline-offset: 2px;
+        animation: generatePulse 1s ease-in-out 4;
+      }
+      @keyframes generatePulse {
+        0%, 100% { outline-color: rgba(8, 137, 8, 1); box-shadow: 0 0 0 0 rgba(8, 137, 8, 0.7); }
+        50% { outline-color: rgba(8, 137, 8, 0.35); box-shadow: 0 0 14px 6px rgba(8, 137, 8, 0.45); }
+      }
 
       .polly-tip-rotator {
         margin-top: 14px;
@@ -337,6 +380,8 @@
       </div>
     </div>
 
+    <div id="polly-squawk-toast" class="polly-squawk-toast">🦜 <strong id="polly-squawk-toast-name"></strong> needs alt text. Let Polly help!</div>
+
     <div id="polly-settings-panel" class="polly-content polly-settings-view">
       <div class="polly-form-group">
         <label for="polly-api-key">Gemini API Key (BYOK)</label>
@@ -385,6 +430,7 @@
       </div>
 
       <div id="polly-active-view" style="display: none;">
+        <!-- Stadium Image Preview (Edge-to-Edge) -->
         <div id="polly-stadium-container" class="polly-stadium-container" style="display: none;">
           <img id="polly-stadium-img" src="" alt="Selected image preview">
         </div>
@@ -895,9 +941,107 @@
         }
       }
 
+      function pulseGenerateButton() {
+        const btn = document.getElementById('polly-generate-btn');
+        btn.classList.remove('pulse');
+        void btn.offsetWidth;
+        btn.classList.add('pulse');
+        clearTimeout(btn._pulseTimer);
+        btn._pulseTimer = setTimeout(() => btn.classList.remove('pulse'), 4000);
+      }
+
+      function playParrotSquawk() {
+        try {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (!AudioContext) return;
+          const ctx = new AudioContext();
+          const master = ctx.createGain();
+          master.gain.value = 0.8;
+          master.connect(ctx.destination);
+
+          const squawk = (start, startFreq, endFreq, dur) => {
+            const t = ctx.currentTime + start;
+
+            const osc = ctx.createOscillator();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(startFreq, t);
+            osc.frequency.exponentialRampToValueAtTime(endFreq, t + dur);
+
+            const rasp = ctx.createOscillator();
+            rasp.frequency.value = 95;
+            const raspDepth = ctx.createGain();
+            raspDepth.gain.value = 220;
+            rasp.connect(raspDepth);
+            raspDepth.connect(osc.frequency);
+
+            const f1 = ctx.createBiquadFilter();
+            f1.type = 'bandpass';
+            f1.frequency.value = 1000;
+            f1.Q.value = 1;
+            const f2 = ctx.createBiquadFilter();
+            f2.type = 'bandpass';
+            f2.frequency.value = 2600;
+            f2.Q.value = 1.5;
+
+            const env = ctx.createGain();
+            env.gain.setValueAtTime(0.0001, t);
+            env.gain.exponentialRampToValueAtTime(1, t + 0.02);
+            env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+            osc.connect(f1);
+            osc.connect(f2);
+            f1.connect(env);
+            f2.connect(env);
+            const nBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+            const nData = nBuf.getChannelData(0);
+            for (let i = 0; i < nData.length; i++) nData[i] = Math.random() * 2 - 1;
+            const noise = ctx.createBufferSource();
+            noise.buffer = nBuf;
+            const nGain = ctx.createGain();
+            nGain.gain.value = 0.35;
+            noise.connect(nGain);
+            nGain.connect(f2);
+            noise.start(t);
+
+            const shaper = ctx.createWaveShaper();
+            const curve = new Float32Array(256);
+            for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 6); }
+            shaper.curve = curve;
+            env.connect(shaper);
+            shaper.connect(master);
+
+            osc.start(t);
+            rasp.start(t);
+            osc.stop(t + dur + 0.02);
+            rasp.stop(t + dur + 0.02);
+          };
+
+          squawk(0, 1500, 600, 0.28);
+          squawk(0.3, 1800, 700, 0.35);
+          setTimeout(() => ctx.close(), 1000);
+        } catch (e) {
+        }
+      }
+
       window.onmessage = (event) => {
         const msg = event.data.pluginMessage;
         if (!msg) return;
+
+        if (msg.type === 'SHOW_SQUAWK_TOAST') {
+          playParrotSquawk();
+          const toast = document.getElementById('polly-squawk-toast');
+          document.getElementById('polly-squawk-toast-name').textContent = msg.nodeName;
+          toast.classList.remove('active');
+          void toast.offsetWidth;
+          toast.classList.add('active');
+          clearTimeout(toast._t);
+          toast._t = setTimeout(() => toast.classList.remove('active'), 3000);
+          pulseGenerateButton();
+        }
+
+        if (msg.type === 'PULSE_GENERATE') {
+          pulseGenerateButton();
+        }
 
         if (msg.type === 'SETTINGS_LOADED') {
           currentSettings = msg.data;

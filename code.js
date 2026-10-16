@@ -98,31 +98,49 @@ function extractNodeContext(node) {
     }
     return context;
 }
+// Send current selection state to UI
 async function sendCurrentSelection() {
     const selection = figma.currentPage.selection;
     if (selection.length === 0) {
         figma.ui.postMessage({ type: 'SELECTION_CLEARED' });
         return;
     }
-    const node = selection[0];
+    let node = selection[0];
+    // If the designer clicked the Squawk Curtain overlay, redirect focus to the actual image
+    if (node.getPluginData('polly_is_squawk_overlay') === 'true') {
+        const targetId = node.getPluginData('polly_target_image_id');
+        const realImageNode = targetId ? figma.getNodeById(targetId) : null;
+        if (realImageNode && !realImageNode.removed) {
+            figma.currentPage.selection = [realImageNode];
+            figma.ui.postMessage({ type: 'PULSE_GENERATE' });
+            return;
+        }
+    }
     let hasImage = false;
+    // Check if layer has an Image paint fill
     if ('fills' in node && Array.isArray(node.fills)) {
         hasImage = node.fills.some(f => f.type === 'IMAGE');
     }
+    // Frames, components, or instances can also represent graphics
     if (!hasImage && (node.type === 'FRAME' || node.type === 'RECTANGLE' || node.type === 'INSTANCE' || node.type === 'COMPONENT')) {
         hasImage = true;
     }
     let previewBase64 = '';
     if (hasImage) {
-        try {
-            const previewBytes = await node.exportAsync({
-                format: 'JPG',
-                constraint: { type: 'WIDTH', value: 800 }
-            });
-            previewBase64 = uint8ArrayToBase64(previewBytes);
-        }
-        catch (e) {
-            // Ignore preview export error
+        // Retry up to 3 times to allow newly dropped bitmaps to finish GPU rasterization
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                const previewBytes = await node.exportAsync({
+                    format: 'JPG',
+                    constraint: { type: 'WIDTH', value: 800 }
+                });
+                previewBase64 = uint8ArrayToBase64(previewBytes);
+                if (previewBase64)
+                    break;
+            }
+            catch (e) {
+                await new Promise(r => setTimeout(r, 180));
+            }
         }
     }
     const existingAlt = node.getPluginData('polly_alt') || '';
@@ -142,6 +160,157 @@ async function sendCurrentSelection() {
     });
 }
 let isSelfUpdating = false;
+const recentlySquawked = new Set();
+let lastCreateAt = 0;
+async function waitForImageFill(node, tries = 12) {
+    for (let i = 0; i < tries; i++) {
+        if (node.removed)
+            return false;
+        if ('fills' in node && Array.isArray(node.fills) && node.fills.some((f) => f.type === 'IMAGE'))
+            return true;
+        await new Promise(r => setTimeout(r, 250));
+    }
+    return false;
+}
+// Helper: Remove any squawk overlay attached to an image
+function removeSquawkOverlay(imgNode) {
+    const overlayId = imgNode.getPluginData('polly_squawk_overlay_id');
+    if (overlayId) {
+        const overlay = figma.getNodeById(overlayId);
+        if (overlay && !overlay.removed) {
+            overlay.remove();
+        }
+        imgNode.setPluginData('polly_squawk_overlay_id', '');
+    }
+}
+// Helper: Create the dimming Squawk Curtain on the image
+async function createSquawkOverlay(imgNode) {
+    if (!imgNode.parent || !('appendChild' in imgNode.parent))
+        return;
+    removeSquawkOverlay(imgNode);
+    await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+    await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+    const overlay = figma.createFrame();
+    overlay.name = `[Squawk Overlay] ${imgNode.name}`;
+    overlay.resize(Math.max(imgNode.width, 160), Math.max(imgNode.height, 120));
+    if ('cornerRadius' in imgNode && typeof imgNode.cornerRadius === 'number') {
+        overlay.cornerRadius = imgNode.cornerRadius;
+    }
+    // 75% dark scrim fill
+    overlay.fills = [{
+            type: 'SOLID',
+            color: { r: 0.08, g: 0.09, b: 0.1 },
+            opacity: 0.82
+        }];
+    overlay.layoutMode = 'VERTICAL';
+    overlay.primaryAxisSizingMode = 'FIXED';
+    overlay.counterAxisSizingMode = 'FIXED';
+    overlay.resize(Math.max(imgNode.width, 160), Math.max(imgNode.height, 120));
+    overlay.primaryAxisAlignItems = 'CENTER';
+    overlay.counterAxisAlignItems = 'CENTER';
+    overlay.paddingLeft = 16;
+    overlay.paddingRight = 16;
+    overlay.paddingTop = 16;
+    overlay.paddingBottom = 16;
+    overlay.itemSpacing = 8;
+    // Squawk Header
+    const title = figma.createText();
+    title.fontName = { family: 'Inter', style: 'Bold' };
+    title.characters = '🦜 SQUAWK!';
+    title.fontSize = Math.min(Math.max(imgNode.width * 0.05, 12), 22);
+    title.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.8, b: 0.2 } }]; // Gold amber
+    title.textAlignHorizontal = 'CENTER';
+    overlay.appendChild(title);
+    // Benevolent Friction Body
+    const msg = figma.createText();
+    msg.fontName = { family: 'Inter', style: 'Regular' };
+    msg.characters = "Your blind visitors won't know what this is until you give it alt.\nLet Polly help you with that!";
+    msg.fontSize = Math.min(Math.max(imgNode.width * 0.035, 10), 14);
+    msg.lineHeight = { value: 140, unit: 'PERCENT' };
+    msg.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+    msg.textAlignHorizontal = 'CENTER';
+    msg.resize(Math.min(imgNode.width - 32, 280), msg.height);
+    msg.textAutoResize = 'HEIGHT';
+    overlay.appendChild(msg);
+    // Link metadata so clicking overlay redirects to image
+    overlay.setPluginData('polly_is_squawk_overlay', 'true');
+    overlay.setPluginData('polly_target_image_id', imgNode.id);
+    imgNode.setPluginData('polly_squawk_overlay_id', overlay.id);
+    imgNode.parent.appendChild(overlay);
+    if ('layoutMode' in imgNode.parent && imgNode.parent.layoutMode !== 'NONE' && 'layoutPositioning' in overlay) {
+        overlay.layoutPositioning = 'ABSOLUTE';
+    }
+    overlay.x = imgNode.x;
+    overlay.y = imgNode.y;
+}
+async function checkAndSquawkNewImage(node) {
+    if (!node || node.removed)
+        return;
+    if (recentlySquawked.has(node.id))
+        return;
+    if (node.getPluginData('polly_is_badge') === 'true' ||
+        node.getPluginData('polly_is_margin_card') === 'true' ||
+        node.getPluginData('polly_is_guide_line') === 'true' ||
+        node.getPluginData('polly_is_squawk_overlay') === 'true') {
+        return;
+    }
+    let hasImage = false;
+    if ('fills' in node && Array.isArray(node.fills)) {
+        hasImage = node.fills.some((f) => f.type === 'IMAGE');
+    }
+    if (hasImage) {
+        const existingAlt = node.getPluginData('polly_alt');
+        const isDecorative = node.getPluginData('polly_is_decorative') === 'true';
+        if (!existingAlt && !isDecorative) {
+            recentlySquawked.add(node.id);
+            setTimeout(() => recentlySquawked.delete(node.id), 8000);
+            // 1. Plant the Squawk Curtain on canvas
+            await createSquawkOverlay(node);
+            // 2. Focus layer & send data to Polly
+            figma.currentPage.selection = [node];
+            await new Promise(r => setTimeout(r, 150));
+            await sendCurrentSelection();
+            // 3. Trigger Polly Green pulsing toast inside plugin
+            figma.ui.postMessage({
+                type: 'SHOW_SQUAWK_TOAST',
+                nodeName: node.name
+            });
+        }
+    }
+}
+// Listen for layer drag/move events & fresh image drops
+figma.on('documentchange', (event) => {
+    if (isSelfUpdating)
+        return;
+    for (const change of event.documentChanges) {
+        if (change.type === 'CREATE') {
+            const node = change.node;
+            if (node && !node.removed) {
+                lastCreateAt = Date.now();
+                waitForImageFill(node).then(ok => { if (ok)
+                    checkAndSquawkNewImage(node); }).catch(e => console.error('Squawk failed', e));
+            }
+        }
+        else if (change.type === 'PROPERTY_CHANGE') {
+            const node = change.node;
+            if (!node || node.removed)
+                continue;
+            if (change.properties.some(p => p === 'x' || p === 'y')) {
+                if (node.getPluginData && node.getPluginData('polly_is_margin_card') === 'true') {
+                    const card = node;
+                    const imgId = card.getPluginData('polly_source_image_id');
+                    const imgNode = imgId ? figma.getNodeById(imgId) : null;
+                    if (imgNode && !imgNode.removed) {
+                        drawOrUpdateLeaderLine(imgNode, card);
+                    }
+                }
+            }
+            if (change.properties.includes('fills')) {
+                setTimeout(() => checkAndSquawkNewImage(node), 120);
+            }
+        }
+    }
+});
 function drawOrUpdateLeaderLine(imgNode, card) {
     if (!imgNode.absoluteBoundingBox || card.removed || imgNode.removed)
         return;
@@ -204,25 +373,13 @@ function drawOrUpdateLeaderLine(imgNode, card) {
     imgNode.setPluginData('polly_margin_line_id', line.id);
     isSelfUpdating = false;
 }
-figma.on('selectionchange', sendCurrentSelection);
-figma.on('documentchange', (event) => {
-    if (isSelfUpdating)
-        return;
-    for (const change of event.documentChanges) {
-        if (change.type === 'PROPERTY_CHANGE') {
-            const node = change.node;
-            if (!node || node.removed)
-                continue;
-            if (node.getPluginData && node.getPluginData('polly_is_margin_card') === 'true') {
-                const card = node;
-                const imgId = card.getPluginData('polly_source_image_id');
-                const imgNode = imgId ? figma.getNodeById(imgId) : null;
-                if (imgNode && !imgNode.removed) {
-                    drawOrUpdateLeaderLine(imgNode, card);
-                }
-            }
-        }
+figma.on('selectionchange', () => {
+    const sel = figma.currentPage.selection[0];
+    if (sel && Date.now() - lastCreateAt < 3000) {
+        waitForImageFill(sel).then(ok => { if (ok)
+            checkAndSquawkNewImage(sel); }).catch(e => console.error('Squawk failed', e));
     }
+    sendCurrentSelection();
 });
 figma.ui.onmessage = async (msg) => {
     if (msg.type === 'RESIZE_WINDOW') {
@@ -416,6 +573,8 @@ figma.ui.onmessage = async (msg) => {
             return;
         const node = selection[0];
         const { altText, isDecorative, explanation } = msg.data;
+        // Remove the Squawk Curtain now that the image is described
+        removeSquawkOverlay(node);
         node.setPluginData('polly_alt', isDecorative ? '' : altText);
         node.setPluginData('polly_is_decorative', isDecorative ? 'true' : 'false');
         if ('annotations' in node) {
