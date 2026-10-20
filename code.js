@@ -107,7 +107,7 @@ async function sendCurrentSelection() {
     }
     let node = selection[0];
     // If the designer clicked the Squawk Curtain overlay, redirect focus to the actual image
-    if (node.getPluginData('polly_is_squawk_overlay') === 'true') {
+    if (node.getPluginData('polly_is_squawk_overlay') === 'true' || node.getPluginData('polly_is_deco_overlay') === 'true') {
         const targetId = node.getPluginData('polly_target_image_id');
         const realImageNode = targetId ? figma.getNodeById(targetId) : null;
         if (realImageNode && !realImageNode.removed) {
@@ -167,13 +167,89 @@ const recentlySquawked = new Set();
 let lastCreateAt = 0;
 async function waitForImageFill(node, tries = 12) {
     for (let i = 0; i < tries; i++) {
-        if (node.removed)
+        if (node.removed || !('fills' in node))
             return false;
         if ('fills' in node && Array.isArray(node.fills) && node.fills.some((f) => f.type === 'IMAGE'))
             return true;
         await new Promise(r => setTimeout(r, 250));
     }
     return false;
+}
+function findAnnotationLayer() {
+    const layer = figma.currentPage.children.find(n => n.getPluginData('polly_is_annotation_layer') === 'true');
+    return layer && layer.type === 'GROUP' ? layer : null;
+}
+function addToAnnotationLayer(node) {
+    let layer = findAnnotationLayer();
+    if (!layer) {
+        layer = figma.group([node], figma.currentPage);
+        layer.name = '🦜 Polly Alt Annotations';
+        layer.setPluginData('polly_is_annotation_layer', 'true');
+        figma.ui.postMessage({ type: 'ANNOTATIONS_VISIBLE', visible: true });
+    }
+    else {
+        layer.appendChild(node);
+        if (!layer.visible) {
+            layer.visible = true;
+            figma.ui.postMessage({ type: 'ANNOTATIONS_VISIBLE', visible: true });
+        }
+    }
+    const pageChildren = figma.currentPage.children;
+    if (pageChildren[pageChildren.length - 1] !== layer)
+        figma.currentPage.appendChild(layer);
+}
+function clearPollyAnnotations(node) {
+    const keys = ['polly_margin_note_id', 'polly_margin_line_id', 'polly_margin_halo_id', 'polly_margin_dot_id', 'polly_deco_overlay_id', 'polly_badge_id'];
+    for (const key of keys) {
+        const id = node.getPluginData(key);
+        if (!id)
+            continue;
+        const target = figma.getNodeById(id);
+        if (target && !target.removed)
+            target.remove();
+        node.setPluginData(key, '');
+    }
+}
+async function createDecorativeOverlay(imgNode) {
+    const b = imgNode.absoluteBoundingBox;
+    if (!b)
+        return;
+    await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+    const overlay = figma.createFrame();
+    overlay.name = `[Decorative] ${imgNode.name}`;
+    overlay.layoutMode = 'VERTICAL';
+    overlay.primaryAxisSizingMode = 'FIXED';
+    overlay.counterAxisSizingMode = 'FIXED';
+    overlay.resize(Math.max(b.width, 160), Math.max(b.height, 60));
+    overlay.primaryAxisAlignItems = 'CENTER';
+    overlay.counterAxisAlignItems = 'CENTER';
+    overlay.paddingLeft = 16;
+    overlay.paddingRight = 16;
+    overlay.paddingTop = 16;
+    overlay.paddingBottom = 16;
+    if ('cornerRadius' in imgNode && typeof imgNode.cornerRadius === 'number') {
+        overlay.cornerRadius = imgNode.cornerRadius;
+    }
+    overlay.fills = [{
+            type: 'SOLID',
+            color: { r: 0.2, g: 0.22, b: 0.25 },
+            opacity: 0.8
+        }];
+    const label = figma.createText();
+    label.fontName = { family: 'Inter', style: 'Bold' };
+    label.characters = 'Purely decorative and unimportant';
+    label.fontSize = Math.min(Math.max(b.width * 0.045, 11), 20);
+    label.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+    label.textAlignHorizontal = 'CENTER';
+    label.resize(Math.max(Math.min(b.width - 32, 280), 60), label.height);
+    label.textAutoResize = 'HEIGHT';
+    overlay.appendChild(label);
+    overlay.setPluginData('polly_is_deco_overlay', 'true');
+    overlay.setPluginData('polly_target_image_id', imgNode.id);
+    imgNode.setPluginData('polly_deco_overlay_id', overlay.id);
+    addToAnnotationLayer(overlay);
+    overlay.x = b.x;
+    overlay.y = b.y;
 }
 // Helper: Remove any squawk overlay attached to an image
 function removeSquawkOverlay(imgNode) {
@@ -349,7 +425,7 @@ function drawOrUpdateLeaderLine(imgNode, card) {
     const dot = figma.createEllipse();
     dot.name = `[Pin] ${imgNode.name}`;
     dot.resize(8, 8);
-    figma.currentPage.appendChild(dot);
+    addToAnnotationLayer(dot);
     dot.x = startX - 4;
     dot.y = startY - 4;
     dot.fills = [{ type: 'SOLID', color: { r: 0.03, g: 0.54, b: 0.03 } }];
@@ -363,7 +439,7 @@ function drawOrUpdateLeaderLine(imgNode, card) {
     halo.strokeWeight = 5.5;
     halo.vectorPaths = [{ windingRule: 'NONE', data: pathData }];
     halo.setPluginData('polly_is_guide_line', 'true');
-    figma.currentPage.appendChild(halo);
+    addToAnnotationLayer(halo);
     imgNode.setPluginData('polly_margin_halo_id', halo.id);
     const line = figma.createVector();
     line.name = `[Guide] ${imgNode.name}`;
@@ -372,7 +448,7 @@ function drawOrUpdateLeaderLine(imgNode, card) {
     line.dashPattern = [6, 4];
     line.vectorPaths = [{ windingRule: 'NONE', data: pathData }];
     line.setPluginData('polly_is_guide_line', 'true');
-    figma.currentPage.appendChild(line);
+    addToAnnotationLayer(line);
     imgNode.setPluginData('polly_margin_line_id', line.id);
     isSelfUpdating = false;
 }
@@ -400,6 +476,8 @@ figma.ui.onmessage = async (msg) => {
                 includeExplanation: true
             }
         });
+        const layer = findAnnotationLayer();
+        figma.ui.postMessage({ type: 'ANNOTATIONS_VISIBLE', visible: layer ? layer.visible : true });
         sendCurrentSelection();
     }
     if (msg.type === 'SAVE_SETTINGS') {
@@ -433,12 +511,10 @@ figma.ui.onmessage = async (msg) => {
         }
     }
     if (msg.type === 'TOGGLE_BADGES') {
-        const show = msg.show;
-        const badges = figma.currentPage.findAll(n => n.getPluginData('polly_is_badge') === 'true');
-        for (const b of badges) {
-            b.visible = show;
-        }
-        figma.notify(show ? '🦜 Alt badges visible' : '🦜 Alt badges hidden for presentation');
+        const layer = findAnnotationLayer();
+        if (layer)
+            layer.visible = msg.show;
+        figma.notify(msg.show ? '🦜 Polly annotations visible' : '🦜 Polly annotations hidden');
     }
     async function pinMarginCallout(node) {
         const altText = node.getPluginData('polly_alt');
@@ -505,7 +581,7 @@ figma.ui.onmessage = async (msg) => {
         body.layoutAlign = 'STRETCH';
         body.textAutoResize = 'HEIGHT';
         card.appendChild(body);
-        figma.currentPage.appendChild(card);
+        addToAnnotationLayer(card);
         const imageBounds = node.absoluteBoundingBox;
         const rootX = 'x' in rootFrame ? rootFrame.x : 0;
         const rootWidth = 'width' in rootFrame ? rootFrame.width : 1200;
@@ -516,7 +592,7 @@ figma.ui.onmessage = async (msg) => {
         for (const child of figma.currentPage.children) {
             if (child.id === rootFrame.id || !('x' in child) || !('width' in child))
                 continue;
-            if (child.getPluginData('polly_is_margin_card') === 'true' || child.getPluginData('polly_is_guide_line') === 'true')
+            if (child.getPluginData('polly_is_margin_card') === 'true' || child.getPluginData('polly_is_guide_line') === 'true' || child.getPluginData('polly_is_annotation_layer') === 'true')
                 continue;
             const childX = child.x;
             const childY = child.y;
@@ -563,6 +639,19 @@ figma.ui.onmessage = async (msg) => {
         drawOrUpdateLeaderLine(node, card);
         node.setPluginData('polly_margin_note_id', card.id);
     }
+    if (msg.type === 'CLEAR_DECORATIVE') {
+        const selection = figma.currentPage.selection;
+        if (selection.length === 0)
+            return;
+        const node = selection[0];
+        clearPollyAnnotations(node);
+        node.setPluginData('polly_is_decorative', 'false');
+        if ('annotations' in node) {
+            node.annotations = node.annotations.filter(a => !(a.labelMarkdown || '').startsWith('**Accessibility'));
+        }
+        checkAndSquawkNewImage(node);
+        sendCurrentSelection();
+    }
     if (msg.type === 'APPLY_ALT_TEXT') {
         const selection = figma.currentPage.selection;
         if (selection.length === 0)
@@ -586,44 +675,6 @@ figma.ui.onmessage = async (msg) => {
                 if (oldBadge)
                     oldBadge.remove();
             }
-            await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
-            await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
-            const badge = figma.createFrame();
-            badge.name = `[Polly Alt] ${node.name}`;
-            badge.layoutMode = 'VERTICAL';
-            badge.paddingLeft = 8;
-            badge.paddingRight = 8;
-            badge.paddingTop = 6;
-            badge.paddingBottom = 6;
-            badge.itemSpacing = 4;
-            badge.cornerRadius = 4;
-            badge.fills = [{ type: 'SOLID', color: { r: 0.94, g: 0.96, b: 0.98 } }];
-            badge.strokes = [{ type: 'SOLID', color: { r: 0.13, g: 0.44, b: 0.69 } }];
-            badge.strokeWeight = 1;
-            badge.setPluginData('polly_is_badge', 'true');
-            const tagText = figma.createText();
-            tagText.fontName = { family: 'Inter', style: 'Bold' };
-            tagText.characters = '🦜 ALT TEXT';
-            tagText.fontSize = 9;
-            tagText.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.44, b: 0.69 } }];
-            badge.appendChild(tagText);
-            const bodyText = figma.createText();
-            bodyText.fontName = { family: 'Inter', style: 'Regular' };
-            bodyText.characters = altText;
-            bodyText.fontSize = 11;
-            bodyText.fills = [{ type: 'SOLID', color: { r: 0.11, g: 0.13, b: 0.15 } }];
-            bodyText.resize(Math.min(node.width, 320), bodyText.height);
-            bodyText.textAutoResize = 'HEIGHT';
-            badge.appendChild(bodyText);
-            if (node.parent && 'appendChild' in node.parent) {
-                node.parent.appendChild(badge);
-                if ('layoutMode' in node.parent && node.parent.layoutMode !== 'NONE') {
-                    badge.layoutPositioning = 'ABSOLUTE';
-                }
-                badge.x = node.x;
-                badge.y = node.y + node.height + 8;
-            }
-            node.setPluginData('polly_badge_id', badge.id);
         }
         if (!isDecorative && altText)
             await pinMarginCallout(node);
