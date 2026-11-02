@@ -171,7 +171,7 @@
         gap: 6px;
       }
       .polly-btn-primary:hover { background: var(--polly-blue-hover); }
-      .polly-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+      .polly-btn-primary:disabled { background: #dcdcde; color: #646970; cursor: not-allowed; }
       .polly-btn-primary.pulse {
         outline: 3px solid #088908;
         outline-offset: 2px;
@@ -723,6 +723,8 @@
         }
         const genBtn = document.getElementById('polly-generate-btn');
         genBtn.textContent = 'Squawking with Gemini...';
+        generating = true;
+        generatingNodeId = currentNode.nodeId;
         genBtn.disabled = true;
         startTipRotator();
 
@@ -741,6 +743,22 @@
           parent.postMessage({ pluginMessage: { type: 'CLEAR_DECORATIVE' } }, '*');
         }
       };
+
+      let suggestionsNodeId = null;
+      let pickedNodeId = null;
+      let generating = false;
+      let generatingNodeId = null;
+
+      function syncGenerateButton() {
+        const hasCards = !!currentNode && suggestionsNodeId === currentNode.nodeId;
+        document.getElementById('polly-generate-btn').disabled = generating || hasCards;
+      }
+
+      function clearSuggestions() {
+        document.getElementById('polly-options-container').innerHTML = '';
+        suggestionsNodeId = null;
+        syncGenerateButton();
+      }
 
       function renderChoiceCards(choices, originalText) {
         const container = document.getElementById('polly-options-container');
@@ -815,6 +833,9 @@
                 data: { altText: finalVal, isDecorative: false, explanation: opt.explanation || '' }
               }
             }, '*');
+
+            pickedNodeId = currentNode.nodeId;
+            clearSuggestions();
           };
 
           const fitBtn = card.querySelector('.polly-fit-btn');
@@ -884,6 +905,7 @@
       }
 
       async function generatePollyAlt(imageData) {
+        const forNodeId = currentNode.nodeId;
         const ctx = currentNode.context;
         let contextBlock = '';
 
@@ -958,14 +980,18 @@
               : null
           }));
 
-          renderChoiceCards(choices, currentNode.existingAlt);
+          if (currentNode && currentNode.nodeId === forNodeId) {
+            renderChoiceCards(choices, currentNode.existingAlt);
+            suggestionsNodeId = forNodeId;
+          }
         } catch (err) {
           alert('🦜 Polly squawked with an error: ' + err.message);
         } finally {
           stopTipRotator();
           const genBtn = document.getElementById('polly-generate-btn');
-          genBtn.textContent = currentNode.existingAlt ? 'Preview and Refine' : 'Preview and Generate';
-          genBtn.disabled = false;
+          generating = false;
+          genBtn.textContent = currentNode && currentNode.existingAlt ? 'Preview and Refine' : 'Preview and Generate';
+          syncGenerateButton();
         }
       }
 
@@ -1130,18 +1156,31 @@
             handoffBox.style.display = 'none';
           }
 
-          if (currentNode.existingAlt && !document.querySelector('.polly-choice-item')) {
-            renderChoiceCards([], currentNode.existingAlt);
+          if (suggestionsNodeId !== currentNode.nodeId) clearSuggestions();
+          if (pickedNodeId !== currentNode.nodeId) {
+            pickedNodeId = null;
+            if (currentNode.existingAlt && !document.querySelector('.polly-choice-item')) {
+              renderChoiceCards([], currentNode.existingAlt);
+            }
           }
+          syncGenerateButton();
         }
 
         if (msg.type === 'IMAGE_DATA_READY') {
-          generatePollyAlt(msg.data);
+          if (currentNode && currentNode.nodeId === generatingNodeId) {
+            generatePollyAlt(msg.data);
+          } else {
+            generating = false;
+            stopTipRotator();
+            document.getElementById('polly-generate-btn').textContent = currentNode && currentNode.existingAlt ? 'Preview and Refine' : 'Preview and Generate';
+            syncGenerateButton();
+          }
         }
 
         if (msg.type === 'IMAGE_DATA_ERROR') {
           stopTipRotator();
           alert('Could not export image from layer: ' + msg.error);
+          generating = false;
           const genBtn = document.getElementById('polly-generate-btn');
           genBtn.disabled = false;
           genBtn.textContent = 'Preview and Generate';

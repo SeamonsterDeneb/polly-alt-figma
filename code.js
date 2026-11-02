@@ -340,6 +340,7 @@ function showFocusRing(target) {
     if (!b)
         return;
     const green = { r: 8 / 255, g: 137 / 255, b: 8 / 255 };
+    const weight = Math.max(5, Math.round(4 / figma.viewport.zoom));
     const ring = figma.createFrame();
     ring.name = '[Polly Focus]';
     ring.resize(Math.max(b.width, 1), Math.max(b.height, 1));
@@ -347,7 +348,7 @@ function showFocusRing(target) {
     ring.clipsContent = false;
     ring.strokes = [{ type: 'SOLID', color: green }];
     ring.strokeAlign = 'OUTSIDE';
-    ring.strokeWeight = 5;
+    ring.strokeWeight = weight;
     ring.setPluginData('polly_is_focus_ring', 'true');
     ring.setPluginData('polly_target_image_id', target.id);
     addToAnnotationLayer(ring, true);
@@ -363,30 +364,28 @@ function showFocusRing(target) {
             clearInterval(focusPulseTimer);
             focusPulseTimer = null;
             if (r && !r.removed) {
-                r.strokeWeight = 5;
+                r.strokeWeight = weight;
                 r.strokes = [{ type: 'SOLID', color: green }];
             }
             return;
         }
         const high = tick % 2 === 0;
-        r.strokeWeight = high ? 5 : 12;
+        r.strokeWeight = high ? weight : Math.round(weight * 2.4);
         r.strokes = [{ type: 'SOLID', color: green, opacity: high ? 1 : 0.45 }];
     }, 375);
 }
 function bringIntoView(node) {
-    const b = node.absoluteBoundingBox;
+    const page = topLevelOf(node);
+    const b = page.absoluteBoundingBox;
     if (!b)
         return;
     const v = figma.viewport.bounds;
-    const inside = b.x >= v.x && b.y >= v.y && b.x + b.width <= v.x + v.width && b.y + b.height <= v.y + v.height;
-    if (inside)
+    const wholePageVisible = b.x >= v.x && b.y >= v.y && b.x + b.width <= v.x + v.width && b.y + b.height <= v.y + v.height;
+    if (wholePageVisible)
         return;
-    if (b.width > v.width || b.height > v.height) {
-        figma.viewport.scrollAndZoomIntoView([node]);
-    }
-    else {
-        figma.viewport.center = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-    }
+    figma.viewport.scrollAndZoomIntoView([page]);
+    if (figma.viewport.zoom > 1)
+        figma.viewport.zoom = 1;
 }
 async function goToNextMissing() {
     const sel = figma.currentPage.selection[0];
