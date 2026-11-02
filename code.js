@@ -107,7 +107,7 @@ async function sendCurrentSelection() {
     }
     let node = selection[0];
     // If the designer clicked the Squawk Curtain overlay, redirect focus to the actual image
-    if (node.getPluginData('polly_is_squawk_overlay') === 'true' || node.getPluginData('polly_is_deco_overlay') === 'true') {
+    if (node.getPluginData('polly_is_squawk_overlay') === 'true' || node.getPluginData('polly_is_deco_overlay') === 'true' || node.getPluginData('polly_is_focus_ring') === 'true') {
         const targetId = node.getPluginData('polly_target_image_id');
         const realImageNode = targetId ? figma.getNodeById(targetId) : null;
         if (realImageNode && !realImageNode.removed) {
@@ -165,6 +165,13 @@ async function sendCurrentSelection() {
 let isSelfUpdating = false;
 const recentlySquawked = new Set();
 let lastCreateAt = 0;
+let overlaySyncTimer = null;
+const SCRIM_OPACITY = 0.68;
+let autoAdvance = true;
+let advanceTimer = null;
+let focusRingId = null;
+let focusTargetId = null;
+let focusPulseTimer = null;
 async function waitForImageFill(node, tries = 12) {
     for (let i = 0; i < tries; i++) {
         if (node.removed || !('fills' in node))
@@ -177,22 +184,25 @@ async function waitForImageFill(node, tries = 12) {
 }
 function findAnnotationLayer() {
     const layer = figma.currentPage.children.find(n => n.getPluginData('polly_is_annotation_layer') === 'true');
-    return layer && layer.type === 'GROUP' ? layer : null;
+    return layer && layer.type === 'FRAME' ? layer : null;
 }
-function addToAnnotationLayer(node) {
+function addToAnnotationLayer(node, reveal = true) {
     let layer = findAnnotationLayer();
     if (!layer) {
-        layer = figma.group([node], figma.currentPage);
+        layer = figma.createFrame();
         layer.name = '🦜 Polly Alt Annotations';
+        layer.x = 0;
+        layer.y = 0;
+        layer.resize(1, 1);
+        layer.fills = [];
+        layer.clipsContent = false;
         layer.setPluginData('polly_is_annotation_layer', 'true');
         figma.ui.postMessage({ type: 'ANNOTATIONS_VISIBLE', visible: true });
     }
-    else {
-        layer.appendChild(node);
-        if (!layer.visible) {
-            layer.visible = true;
-            figma.ui.postMessage({ type: 'ANNOTATIONS_VISIBLE', visible: true });
-        }
+    layer.appendChild(node);
+    if (reveal && !layer.visible) {
+        layer.visible = true;
+        figma.ui.postMessage({ type: 'ANNOTATIONS_VISIBLE', visible: true });
     }
     const pageChildren = figma.currentPage.children;
     if (pageChildren[pageChildren.length - 1] !== layer)
@@ -211,45 +221,7 @@ function clearPollyAnnotations(node) {
     }
 }
 async function createDecorativeOverlay(imgNode) {
-    const b = imgNode.absoluteBoundingBox;
-    if (!b)
-        return;
-    await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
-    const overlay = figma.createFrame();
-    overlay.name = `[Decorative] ${imgNode.name}`;
-    overlay.layoutMode = 'VERTICAL';
-    overlay.primaryAxisSizingMode = 'FIXED';
-    overlay.counterAxisSizingMode = 'FIXED';
-    overlay.resize(Math.max(b.width, 160), Math.max(b.height, 60));
-    overlay.primaryAxisAlignItems = 'CENTER';
-    overlay.counterAxisAlignItems = 'CENTER';
-    overlay.paddingLeft = 16;
-    overlay.paddingRight = 16;
-    overlay.paddingTop = 16;
-    overlay.paddingBottom = 16;
-    if ('cornerRadius' in imgNode && typeof imgNode.cornerRadius === 'number') {
-        overlay.cornerRadius = imgNode.cornerRadius;
-    }
-    overlay.fills = [{
-            type: 'SOLID',
-            color: { r: 0.2, g: 0.22, b: 0.25 },
-            opacity: 0.8
-        }];
-    const label = figma.createText();
-    label.fontName = { family: 'Inter', style: 'Bold' };
-    label.characters = 'Purely decorative and unimportant';
-    label.fontSize = Math.min(Math.max(b.width * 0.045, 11), 20);
-    label.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
-    label.textAlignHorizontal = 'CENTER';
-    label.resize(Math.max(Math.min(b.width - 32, 280), 60), label.height);
-    label.textAutoResize = 'HEIGHT';
-    overlay.appendChild(label);
-    overlay.setPluginData('polly_is_deco_overlay', 'true');
-    overlay.setPluginData('polly_target_image_id', imgNode.id);
-    imgNode.setPluginData('polly_deco_overlay_id', overlay.id);
-    addToAnnotationLayer(overlay);
-    overlay.x = b.x;
-    overlay.y = b.y;
+    await createScrimOverlay(imgNode, 'decorative');
 }
 // Helper: Remove any squawk overlay attached to an image
 function removeSquawkOverlay(imgNode) {
@@ -262,65 +234,358 @@ function removeSquawkOverlay(imgNode) {
         imgNode.setPluginData('polly_squawk_overlay_id', '');
     }
 }
-// Helper: Create the dimming Squawk Curtain on the image
-async function createSquawkOverlay(imgNode) {
-    if (!imgNode.parent || !('appendChild' in imgNode.parent))
+function isPollyNode(node) {
+    const flags = ['polly_is_margin_card', 'polly_is_guide_line', 'polly_is_squawk_overlay', 'polly_is_deco_overlay', 'polly_is_badge', 'polly_is_annotation_layer'];
+    const has = (n) => !!n && 'getPluginData' in n && flags.some(f => n.getPluginData(f) === 'true');
+    return has(node) || has(node.parent);
+}
+function isShown(node) {
+    let p = node;
+    while (p && p.type !== 'PAGE') {
+        if ('visible' in p && !p.visible)
+            return false;
+        p = p.parent;
+    }
+    return true;
+}
+function isUndescribedImage(n) {
+    if (!('fills' in n) || isPollyNode(n) || !isShown(n))
+        return false;
+    const fills = n.fills;
+    if (!Array.isArray(fills) || !fills.some((f) => f.type === 'IMAGE' && f.visible !== false))
+        return false;
+    return !n.getPluginData('polly_alt') && n.getPluginData('polly_is_decorative') !== 'true';
+}
+function syncOverlays() {
+    const layer = findAnnotationLayer();
+    if (!layer)
         return;
-    removeSquawkOverlay(imgNode);
-    await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
-    await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+    for (const o of layer.children.slice()) {
+        if (o.getPluginData('polly_is_squawk_overlay') !== 'true' && o.getPluginData('polly_is_deco_overlay') !== 'true')
+            continue;
+        const target = figma.getNodeById(o.getPluginData('polly_target_image_id'));
+        if (!target || target.removed) {
+            o.remove();
+            continue;
+        }
+        const b = target.absoluteBoundingBox;
+        if (!b)
+            continue;
+        const shown = isShown(target);
+        if (o.visible !== shown)
+            o.visible = shown;
+        if (Math.abs(o.x - b.x) > 0.5 || Math.abs(o.y - b.y) > 0.5) {
+            o.x = b.x;
+            o.y = b.y;
+        }
+        if (Math.abs(o.width - b.width) > 0.5 || Math.abs(o.height - b.height) > 0.5) {
+            o.resize(Math.max(b.width, 1), Math.max(b.height, 1));
+        }
+    }
+}
+function scheduleOverlaySync() {
+    if (overlaySyncTimer)
+        return;
+    overlaySyncTimer = setTimeout(() => {
+        overlaySyncTimer = null;
+        syncOverlays();
+        sendMissingCount();
+    }, 150);
+}
+function topLevelOf(n) {
+    let p = n;
+    while (p.parent && p.parent.type !== 'PAGE')
+        p = p.parent;
+    return p;
+}
+function byReadingOrder(a, b) {
+    const ta = topLevelOf(a);
+    const tb = topLevelOf(b);
+    if (ta.id !== tb.id) {
+        const ra = ta.absoluteBoundingBox;
+        const rb = tb.absoluteBoundingBox;
+        if (ra && rb)
+            return Math.abs(ra.y - rb.y) > 20 ? ra.y - rb.y : ra.x - rb.x;
+    }
+    const ba = a.absoluteBoundingBox;
+    const bb = b.absoluteBoundingBox;
+    if (!ba || !bb)
+        return 0;
+    return Math.abs(ba.y - bb.y) > 20 ? ba.y - bb.y : ba.x - bb.x;
+}
+function missingImages(keepId = null) {
+    const found = figma.currentPage.findAll(n => isUndescribedImage(n) || n.id === keepId);
+    return found.sort(byReadingOrder);
+}
+function setStatus(text) {
+    figma.ui.postMessage({ type: 'STATUS', text });
+}
+function sendMissingCount() {
+    figma.ui.postMessage({ type: 'MISSING_COUNT', count: missingImages().length });
+}
+function clearFocusRing() {
+    if (focusPulseTimer) {
+        clearInterval(focusPulseTimer);
+        focusPulseTimer = null;
+    }
+    const ring = focusRingId ? figma.getNodeById(focusRingId) : null;
+    if (ring && !ring.removed)
+        ring.remove();
+    focusRingId = null;
+    focusTargetId = null;
+}
+function showFocusRing(target) {
+    clearFocusRing();
+    const b = target.absoluteBoundingBox;
+    if (!b)
+        return;
+    const green = { r: 8 / 255, g: 137 / 255, b: 8 / 255 };
+    const ring = figma.createFrame();
+    ring.name = '[Polly Focus]';
+    ring.resize(Math.max(b.width, 1), Math.max(b.height, 1));
+    ring.fills = [];
+    ring.clipsContent = false;
+    ring.strokes = [{ type: 'SOLID', color: green }];
+    ring.strokeAlign = 'OUTSIDE';
+    ring.strokeWeight = 5;
+    ring.setPluginData('polly_is_focus_ring', 'true');
+    ring.setPluginData('polly_target_image_id', target.id);
+    addToAnnotationLayer(ring, true);
+    ring.x = b.x;
+    ring.y = b.y;
+    focusRingId = ring.id;
+    focusTargetId = target.id;
+    let tick = 0;
+    focusPulseTimer = setInterval(() => {
+        tick++;
+        const r = focusRingId ? figma.getNodeById(focusRingId) : null;
+        if (!r || r.removed || tick >= 8) {
+            clearInterval(focusPulseTimer);
+            focusPulseTimer = null;
+            if (r && !r.removed) {
+                r.strokeWeight = 5;
+                r.strokes = [{ type: 'SOLID', color: green }];
+            }
+            return;
+        }
+        const high = tick % 2 === 0;
+        r.strokeWeight = high ? 5 : 12;
+        r.strokes = [{ type: 'SOLID', color: green, opacity: high ? 1 : 0.45 }];
+    }, 375);
+}
+function bringIntoView(node) {
+    const b = node.absoluteBoundingBox;
+    if (!b)
+        return;
+    const v = figma.viewport.bounds;
+    const inside = b.x >= v.x && b.y >= v.y && b.x + b.width <= v.x + v.width && b.y + b.height <= v.y + v.height;
+    if (inside)
+        return;
+    if (b.width > v.width || b.height > v.height) {
+        figma.viewport.scrollAndZoomIntoView([node]);
+    }
+    else {
+        figma.viewport.center = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    }
+}
+async function goToNextMissing() {
+    const sel = figma.currentPage.selection[0];
+    let fromId = sel ? sel.id : null;
+    if (sel && sel.getPluginData('polly_target_image_id'))
+        fromId = sel.getPluginData('polly_target_image_id');
+    const list = missingImages(fromId);
+    const idx = fromId ? list.findIndex(n => n.id === fromId) : -1;
+    let next = null;
+    for (let i = 1; i <= list.length; i++) {
+        const cand = list[(idx + i + list.length) % list.length];
+        if (cand.id !== fromId) {
+            next = cand;
+            break;
+        }
+    }
+    if (!next) {
+        figma.notify(list.some(n => n.id !== fromId) || (fromId && isUndescribedImage(figma.getNodeById(fromId)))
+            ? '🦜 This is the only image missing alt text.'
+            : '🦜 Every image on this page has alt text!');
+        sendMissingCount();
+        return false;
+    }
+    focusTargetId = next.id;
+    figma.currentPage.selection = [next];
+    bringIntoView(next);
+    showFocusRing(next);
+    figma.ui.postMessage({ type: 'PULSE_GENERATE' });
+    sendMissingCount();
+    return true;
+}
+function runPollyDiagnostic() {
+    const t = {
+        nodesOnPage: 0, pollyOwned: 0, hasFillsArray: 0, hasImageFill: 0, imageFillButInvisible: 0,
+        imageFillHiddenByAncestor: 0, hasAltSaved: 0, markedDecorative: 0, passesFilter: 0,
+        passingWithLiveOldScrim: 0, passingInsideInstance: 0, passingSetPluginDataFails: 0,
+        frameOrComponentOrInstanceWithoutImageFill: 0
+    };
+    const imageFillTypes = {};
+    const sample = [];
+    const all = figma.currentPage.findAll(() => true);
+    for (const n of all) {
+        t.nodesOnPage++;
+        try {
+            if (isPollyNode(n)) {
+                t.pollyOwned++;
+                continue;
+            }
+            const fills = n.fills;
+            if (Array.isArray(fills)) {
+                t.hasFillsArray++;
+                const img = fills.filter((f) => f.type === 'IMAGE');
+                if (img.length) {
+                    t.hasImageFill++;
+                    imageFillTypes[n.type] = (imageFillTypes[n.type] || 0) + 1;
+                    if (!img.some((f) => f.visible !== false))
+                        t.imageFillButInvisible++;
+                    if (!isShown(n))
+                        t.imageFillHiddenByAncestor++;
+                    if (n.getPluginData('polly_alt'))
+                        t.hasAltSaved++;
+                    if (n.getPluginData('polly_is_decorative') === 'true')
+                        t.markedDecorative++;
+                }
+                else if (n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE') {
+                    t.frameOrComponentOrInstanceWithoutImageFill++;
+                }
+            }
+            if (isUndescribedImage(n)) {
+                t.passesFilter++;
+                if (sample.length < 5)
+                    sample.push(n.type + ' "' + n.name + '"');
+                const oid = n.getPluginData('polly_squawk_overlay_id');
+                const old = oid ? figma.getNodeById(oid) : null;
+                if (old && !old.removed)
+                    t.passingWithLiveOldScrim++;
+                let p = n.parent;
+                while (p && p.type !== 'PAGE') {
+                    if (p.type === 'INSTANCE') {
+                        t.passingInsideInstance++;
+                        break;
+                    }
+                    p = p.parent;
+                }
+                try {
+                    n.setPluginData('polly_probe', '1');
+                    n.setPluginData('polly_probe', '');
+                }
+                catch (e) {
+                    t.passingSetPluginDataFails++;
+                }
+            }
+        }
+        catch (e) {
+            t.errors = (t.errors || 0) + 1;
+        }
+    }
+    console.log('POLLY DIAGNOSTIC', JSON.stringify({ page: figma.currentPage.name, totals: t, imageFillNodeTypes: imageFillTypes, sampleOfPassing: sample }, null, 2));
+    figma.notify('🦜 Diagnostic printed to the console (' + t.passesFilter + ' pass the filter)');
+}
+async function squawkAllMissingAlt() {
+    setStatus('🔍 Scanning for images missing alt…');
+    await new Promise(r => setTimeout(r, 60));
+    const targets = figma.currentPage.findAll(n => isUndescribedImage(n));
+    const fresh = targets.filter(n => {
+        const id = n.getPluginData('polly_squawk_overlay_id');
+        const existing = id ? figma.getNodeById(id) : null;
+        return !(existing && !existing.removed);
+    });
+    let skipped = 0;
+    for (const n of fresh) {
+        try {
+            await createSquawkOverlay(n, false);
+        }
+        catch (e) {
+            skipped++;
+        }
+    }
+    syncOverlays();
+    if (targets.length > 0) {
+        const s = targets.length === 1 ? '' : 's';
+        figma.notify(`🦜 SQUAWK! ${targets.length} image${s} on this page ${targets.length === 1 ? 'is' : 'are'} missing alt text.${skipped ? ` (${skipped} could not be marked)` : ''}`);
+    }
+}
+async function createScrimOverlay(imgNode, kind, reveal = true) {
+    const b = imgNode.absoluteBoundingBox;
+    if (!b)
+        return;
+    const isSquawk = kind === 'squawk';
+    if (isSquawk)
+        removeSquawkOverlay(imgNode);
+    const showTitle = isSquawk ? (b.width >= 90 && b.height >= 40) : (b.width >= 110 && b.height >= 40);
+    const showBody = isSquawk && b.width >= 150 && b.height >= 90;
+    if (showTitle) {
+        await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+        if (showBody)
+            await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+    }
     const overlay = figma.createFrame();
-    overlay.name = `[Squawk Overlay] ${imgNode.name}`;
-    overlay.resize(Math.max(imgNode.width, 160), Math.max(imgNode.height, 120));
-    if ('cornerRadius' in imgNode && typeof imgNode.cornerRadius === 'number') {
-        overlay.cornerRadius = imgNode.cornerRadius;
+    try {
+        overlay.name = isSquawk ? `[Squawk Overlay] ${imgNode.name}` : `[Decorative] ${imgNode.name}`;
+        overlay.layoutMode = 'VERTICAL';
+        overlay.primaryAxisSizingMode = 'FIXED';
+        overlay.counterAxisSizingMode = 'FIXED';
+        overlay.resize(Math.max(b.width, 1), Math.max(b.height, 1));
+        overlay.primaryAxisAlignItems = 'CENTER';
+        overlay.counterAxisAlignItems = 'CENTER';
+        overlay.paddingLeft = 12;
+        overlay.paddingRight = 12;
+        overlay.paddingTop = 12;
+        overlay.paddingBottom = 12;
+        overlay.itemSpacing = 6;
+        overlay.clipsContent = true;
+        if ('cornerRadius' in imgNode && typeof imgNode.cornerRadius === 'number') {
+            overlay.cornerRadius = imgNode.cornerRadius;
+        }
+        overlay.fills = [{
+                type: 'SOLID',
+                color: { r: 0.08, g: 0.09, b: 0.1 },
+                opacity: SCRIM_OPACITY
+            }];
+        const textWidth = Math.max(Math.min(b.width - 24, 280), 40);
+        if (showTitle) {
+            const title = figma.createText();
+            title.fontName = { family: 'Inter', style: 'Bold' };
+            title.characters = isSquawk ? '🦜 SQUAWK!' : 'Purely decorative and unimportant';
+            title.fontSize = isSquawk ? Math.min(Math.max(b.width * 0.05, 10), 22) : Math.min(Math.max(b.width * 0.045, 10), 20);
+            title.fills = [{ type: 'SOLID', color: isSquawk ? { r: 1, g: 0.92, b: 0.6 } : { r: 1, g: 1, b: 1 } }];
+            title.textAlignHorizontal = 'CENTER';
+            title.resize(textWidth, title.height);
+            title.textAutoResize = 'HEIGHT';
+            overlay.appendChild(title);
+        }
+        if (showBody) {
+            const msg = figma.createText();
+            msg.fontName = { family: 'Inter', style: 'Regular' };
+            msg.characters = "Your blind visitors won't know what this is until you give it alt.\nLet Polly help you with that!";
+            msg.fontSize = Math.min(Math.max(b.width * 0.035, 10), 14);
+            msg.lineHeight = { value: 140, unit: 'PERCENT' };
+            msg.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+            msg.textAlignHorizontal = 'CENTER';
+            msg.resize(textWidth, msg.height);
+            msg.textAutoResize = 'HEIGHT';
+            overlay.appendChild(msg);
+        }
+        overlay.setPluginData(isSquawk ? 'polly_is_squawk_overlay' : 'polly_is_deco_overlay', 'true');
+        overlay.setPluginData('polly_target_image_id', imgNode.id);
+        imgNode.setPluginData(isSquawk ? 'polly_squawk_overlay_id' : 'polly_deco_overlay_id', overlay.id);
     }
-    // 75% dark scrim fill
-    overlay.fills = [{
-            type: 'SOLID',
-            color: { r: 0.08, g: 0.09, b: 0.1 },
-            opacity: 0.82
-        }];
-    overlay.layoutMode = 'VERTICAL';
-    overlay.primaryAxisSizingMode = 'FIXED';
-    overlay.counterAxisSizingMode = 'FIXED';
-    overlay.resize(Math.max(imgNode.width, 160), Math.max(imgNode.height, 120));
-    overlay.primaryAxisAlignItems = 'CENTER';
-    overlay.counterAxisAlignItems = 'CENTER';
-    overlay.paddingLeft = 16;
-    overlay.paddingRight = 16;
-    overlay.paddingTop = 16;
-    overlay.paddingBottom = 16;
-    overlay.itemSpacing = 8;
-    // Squawk Header
-    const title = figma.createText();
-    title.fontName = { family: 'Inter', style: 'Bold' };
-    title.characters = '🦜 SQUAWK!';
-    title.fontSize = Math.min(Math.max(imgNode.width * 0.05, 12), 22);
-    title.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.8, b: 0.2 } }]; // Gold amber
-    title.textAlignHorizontal = 'CENTER';
-    overlay.appendChild(title);
-    // Benevolent Friction Body
-    const msg = figma.createText();
-    msg.fontName = { family: 'Inter', style: 'Regular' };
-    msg.characters = "Your blind visitors won't know what this is until you give it alt.\nLet Polly help you with that!";
-    msg.fontSize = Math.min(Math.max(imgNode.width * 0.035, 10), 14);
-    msg.lineHeight = { value: 140, unit: 'PERCENT' };
-    msg.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
-    msg.textAlignHorizontal = 'CENTER';
-    msg.resize(Math.min(imgNode.width - 32, 280), msg.height);
-    msg.textAutoResize = 'HEIGHT';
-    overlay.appendChild(msg);
-    // Link metadata so clicking overlay redirects to image
-    overlay.setPluginData('polly_is_squawk_overlay', 'true');
-    overlay.setPluginData('polly_target_image_id', imgNode.id);
-    imgNode.setPluginData('polly_squawk_overlay_id', overlay.id);
-    imgNode.parent.appendChild(overlay);
-    if ('layoutMode' in imgNode.parent && imgNode.parent.layoutMode !== 'NONE' && 'layoutPositioning' in overlay) {
-        overlay.layoutPositioning = 'ABSOLUTE';
+    catch (e) {
+        overlay.remove();
+        throw e;
     }
-    overlay.x = imgNode.x;
-    overlay.y = imgNode.y;
+    addToAnnotationLayer(overlay, reveal);
+    overlay.x = b.x;
+    overlay.y = b.y;
+}
+async function createSquawkOverlay(imgNode, reveal = true) {
+    await createScrimOverlay(imgNode, 'squawk', reveal);
 }
 async function checkAndSquawkNewImage(node) {
     if (!node || node.removed)
@@ -364,7 +629,7 @@ figma.on('documentchange', (event) => {
     for (const change of event.documentChanges) {
         if (change.type === 'CREATE') {
             const node = change.node;
-            if (node && !node.removed) {
+            if (node && !node.removed && !isPollyNode(node)) {
                 lastCreateAt = Date.now();
                 waitForImageFill(node).then(ok => { if (ok)
                     checkAndSquawkNewImage(node); }).catch(e => console.error('Squawk failed', e));
@@ -374,6 +639,9 @@ figma.on('documentchange', (event) => {
             const node = change.node;
             if (!node || node.removed)
                 continue;
+            if (!isPollyNode(node) && change.properties.some(p => p === 'x' || p === 'y' || p === 'width' || p === 'height' || p === 'rotation' || p === 'visible')) {
+                scheduleOverlaySync();
+            }
             if (change.properties.some(p => p === 'x' || p === 'y')) {
                 if (node.getPluginData && node.getPluginData('polly_is_margin_card') === 'true') {
                     const card = node;
@@ -387,6 +655,9 @@ figma.on('documentchange', (event) => {
             if (change.properties.includes('fills')) {
                 setTimeout(() => checkAndSquawkNewImage(node), 120);
             }
+        }
+        else if (change.type === 'DELETE') {
+            scheduleOverlaySync();
         }
     }
 });
@@ -454,6 +725,9 @@ function drawOrUpdateLeaderLine(imgNode, card) {
 }
 figma.on('selectionchange', () => {
     const sel = figma.currentPage.selection[0];
+    if (focusTargetId && (!sel || (sel.id !== focusTargetId && sel.getPluginData('polly_is_focus_ring') !== 'true'))) {
+        clearFocusRing();
+    }
     if (sel && Date.now() - lastCreateAt < 3000) {
         waitForImageFill(sel).then(ok => { if (ok)
             checkAndSquawkNewImage(sel); }).catch(e => console.error('Squawk failed', e));
@@ -478,7 +752,19 @@ figma.ui.onmessage = async (msg) => {
         });
         const layer = findAnnotationLayer();
         figma.ui.postMessage({ type: 'ANNOTATIONS_VISIBLE', visible: layer ? layer.visible : true });
+        const storedAdvance = await figma.clientStorage.getAsync('polly_auto_advance');
+        autoAdvance = storedAdvance !== false;
+        figma.ui.postMessage({ type: 'AUTO_ADVANCE_LOADED', value: autoAdvance });
         sendCurrentSelection();
+        squawkAllMissingAlt().then(() => { setStatus(''); sendMissingCount(); }).catch(e => { setStatus(''); console.error('Squawk scan failed', e); });
+        runPollyDiagnostic();
+    }
+    if (msg.type === 'NEXT_MISSING') {
+        goToNextMissing().catch(e => console.error('Next image failed', e));
+    }
+    if (msg.type === 'SET_AUTO_ADVANCE') {
+        autoAdvance = !!msg.value;
+        figma.clientStorage.setAsync('polly_auto_advance', autoAdvance).catch(() => { });
     }
     if (msg.type === 'SAVE_SETTINGS') {
         await figma.clientStorage.setAsync('polly_settings', msg.data);
@@ -651,6 +937,7 @@ figma.ui.onmessage = async (msg) => {
         }
         checkAndSquawkNewImage(node);
         sendCurrentSelection();
+        scheduleOverlaySync();
     }
     if (msg.type === 'APPLY_ALT_TEXT') {
         const selection = figma.currentPage.selection;
@@ -668,17 +955,32 @@ figma.ui.onmessage = async (msg) => {
                 : `**Accessibility (Alt Text):**\n\`\`\`text\n${altText}\n\`\`\`${explanation ? `\n\n*Rationale:* ${explanation}` : ''}`;
             node.annotations = [{ labelMarkdown: markdown }];
         }
-        if (!isDecorative && altText) {
-            const priorBadgeId = node.getPluginData('polly_badge_id');
-            if (priorBadgeId) {
-                const oldBadge = figma.getNodeById(priorBadgeId);
-                if (oldBadge)
-                    oldBadge.remove();
-            }
+        clearPollyAnnotations(node);
+        if (isDecorative) {
+            await createDecorativeOverlay(node);
         }
-        if (!isDecorative && altText)
+        else if (altText) {
             await pinMarginCallout(node);
-        figma.notify('🦜 Alt text saved & pinned to the canvas!');
+        }
+        figma.notify(isDecorative ? '🦜 Marked decorative' : '🦜 Alt text saved & pinned to the canvas!');
         sendCurrentSelection();
+        if (autoAdvance) {
+            const doneId = node.id;
+            clearTimeout(advanceTimer);
+            setStatus('🦜 Saved! Moving to the next image…');
+            advanceTimer = setTimeout(() => {
+                setStatus('');
+                const cur = figma.currentPage.selection[0];
+                if (cur && cur.id === doneId) {
+                    goToNextMissing().catch(e => console.error('Next image failed', e));
+                }
+                else {
+                    sendMissingCount();
+                }
+            }, 1500);
+        }
+        else {
+            scheduleOverlaySync();
+        }
     }
 };

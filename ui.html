@@ -182,6 +182,21 @@
         50% { outline-color: rgba(8, 137, 8, 0.35); box-shadow: 0 0 14px 6px rgba(8, 137, 8, 0.45); }
       }
 
+      .polly-next-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--polly-border);
+        background: #f6faf0;
+        font-size: 12px;
+      }
+      .polly-missing-count { font-weight: 600; color: #2c3338; }
+      .polly-status { flex-basis: 100%; font-weight: 600; color: #088908; }
+      .polly-status:empty { display: none; }
+      .polly-auto-advance { margin-left: auto; display: flex; align-items: center; gap: 4px; color: #2c3338; cursor: pointer; }
+
       .polly-tip-rotator {
         margin-top: 14px;
         padding: 12px 14px;
@@ -368,6 +383,7 @@
       .polly-resize-handle:hover svg {
         opacity: 1;
       }
+
     </style>
   </head>
   <body>
@@ -378,6 +394,13 @@
         <button type="button" id="polly-toggle-badges-btn" class="polly-nav-btn">👁️ Annotations</button>
         <button type="button" id="polly-toggle-settings" class="polly-nav-btn">⚙️ Settings</button>
       </div>
+    </div>
+
+    <div class="polly-next-row">
+      <button type="button" id="polly-next-btn" class="polly-nav-btn">⏭️ Next image missing alt</button>
+      <span id="polly-missing-count" class="polly-missing-count" role="status" aria-live="polite"></span>
+      <label class="polly-auto-advance"><input type="checkbox" id="polly-auto-advance" checked> Auto-advance</label>
+      <span id="polly-status" class="polly-status" role="status" aria-live="polite"></span>
     </div>
 
     <div id="polly-squawk-toast" class="polly-squawk-toast">🦜 <strong id="polly-squawk-toast-name"></strong> needs alt text. Let Polly help!</div>
@@ -946,6 +969,14 @@
         }
       }
 
+      document.getElementById('polly-next-btn').onclick = () => {
+        parent.postMessage({ pluginMessage: { type: 'NEXT_MISSING' } }, '*');
+      };
+
+      document.getElementById('polly-auto-advance').onchange = (e) => {
+        parent.postMessage({ pluginMessage: { type: 'SET_AUTO_ADVANCE', value: e.target.checked } }, '*');
+      };
+
       function pulseGenerateButton() {
         const btn = document.getElementById('polly-generate-btn');
         btn.classList.remove('pulse');
@@ -1008,6 +1039,19 @@
           clearTimeout(toast._t);
           toast._t = setTimeout(() => toast.classList.remove('active'), 3000);
           pulseGenerateButton();
+        }
+
+        if (msg.type === 'STATUS') {
+          document.getElementById('polly-status').textContent = msg.text;
+        }
+
+        if (msg.type === 'MISSING_COUNT') {
+          document.getElementById('polly-missing-count').textContent = msg.count === 0 ? 'All images described 🎉' : msg.count + ' missing alt';
+          document.getElementById('polly-next-btn').disabled = msg.count === 0;
+        }
+
+        if (msg.type === 'AUTO_ADVANCE_LOADED') {
+          document.getElementById('polly-auto-advance').checked = msg.value;
         }
 
         if (msg.type === 'PULSE_GENERATE') {
