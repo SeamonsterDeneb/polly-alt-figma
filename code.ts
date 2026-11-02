@@ -769,7 +769,7 @@ figma.ui.onmessage = async (msg) => {
       type: 'SETTINGS_LOADED',
       data: settings || {
         apiKey: '',
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.5-flash-lite',
         choiceCount: 3,
         includeExplanation: true
       }

@@ -528,7 +528,7 @@
 
       let currentSettings = {
         apiKey: '',
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.5-flash-lite',
         choiceCount: 3,
         includeExplanation: true
       };
@@ -594,7 +594,8 @@
             cleanName.includes('text') ||
             cleanName.includes('aqa') ||
             cleanName.includes('tuning') ||
-            cleanName.includes('imagen')
+            cleanName.includes('imagen') ||
+            /tts|image|live|audio|robotics|transcribe|computer-use/.test(cleanName)
           ) {
             continue;
           }
@@ -631,11 +632,14 @@
 
           select.innerHTML = '';
 
-          let recommendedId = '';
-          for (const m of models) {
-            if (m.id.includes('-flash')) {
-              if (!recommendedId || m.id.localeCompare(recommendedId, undefined, { numeric: true }) > 0) {
-                recommendedId = m.id;
+          const preferredModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
+          let recommendedId = preferredModels.find(id => models.some(m => m.id === id)) || '';
+          if (!recommendedId) {
+            for (const m of models) {
+              if (m.id.includes('-flash')) {
+                if (!recommendedId || m.id.localeCompare(recommendedId, undefined, { numeric: true }) > 0) {
+                  recommendedId = m.id;
+                }
               }
             }
           }
@@ -729,7 +733,7 @@
           return;
         }
         const genBtn = document.getElementById('polly-generate-btn');
-        genBtn.textContent = 'Squawking with Gemini...';
+        genBtn.textContent = 'Preparing some alt options...';
         generating = true;
         generatingNodeId = currentNode.nodeId;
         genBtn.disabled = true;
