@@ -76,21 +76,28 @@
       .polly-empty-icon { font-size: 40px; }
 
       .polly-stadium-container {
-        margin: -14px -14px 14px -14px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        height: 34vh;
+        margin: 0 0 14px 0;
         background: #111111;
-        max-height: 200px;
-        overflow-y: auto;
-        overflow-x: hidden;
+        overflow: hidden;
         border-bottom: 1px solid var(--polly-border);
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
         display: flex;
-        justify-content: center;
+        justify-content: flex-start;
         align-items: flex-start;
         flex-shrink: 0;
       }
+      .polly-stadium-container:focus-visible {
+        outline: 3px solid #088908;
+        outline-offset: -3px;
+      }
       .polly-stadium-container img {
-        width: 100%;
-        height: auto;
         display: block;
+        flex: none;
+        max-width: none;
       }
       .polly-squawk-alert {
         display: none;
@@ -454,7 +461,7 @@
 
       <div id="polly-active-view" style="display: none;">
         <!-- Stadium Image Preview (Edge-to-Edge) -->
-        <div id="polly-stadium-container" class="polly-stadium-container" style="display: none;">
+        <div id="polly-stadium-container" class="polly-stadium-container" style="display: none;" tabindex="0" role="region" aria-label="Selected image preview, scrollable">
           <img id="polly-stadium-img" src="" alt="Selected image preview">
         </div>
 
@@ -1010,6 +1017,40 @@
         btn.classList.add('pulse');
         clearTimeout(btn._pulseTimer);
         btn._pulseTimer = setTimeout(() => btn.classList.remove('pulse'), 4000);
+      }
+
+      function fitStadiumImage() {
+        const box = document.getElementById('polly-stadium-container');
+        const img = document.getElementById('polly-stadium-img');
+        if (!img.naturalWidth || box.style.display === 'none') return;
+
+        box.style.overflow = 'hidden';
+        const boxW = box.clientWidth;
+        const boxH = box.clientHeight;
+        if (!boxW || !boxH) return;
+
+        const isTall = (img.naturalHeight / img.naturalWidth) > (boxH / boxW);
+        box.style.overflowX = isTall ? 'hidden' : 'scroll';
+        box.style.overflowY = isTall ? 'scroll' : 'hidden';
+
+        if (isTall) {
+          img.style.width = box.clientWidth + 'px';
+          img.style.height = 'auto';
+        } else {
+          img.style.height = box.clientHeight + 'px';
+          img.style.width = 'auto';
+        }
+      }
+
+      document.getElementById('polly-stadium-img').onload = () => {
+        const box = document.getElementById('polly-stadium-container');
+        fitStadiumImage();
+        box.scrollTop = 0;
+        box.scrollLeft = 0;
+      };
+
+      if (window.ResizeObserver) {
+        new ResizeObserver(fitStadiumImage).observe(document.getElementById('polly-stadium-container'));
       }
 
       const SQUAWK_BUFFERS = [];
