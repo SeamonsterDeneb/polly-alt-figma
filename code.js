@@ -30,14 +30,8 @@ function extractNodeContext(node) {
         paragraphsBefore: '',
         paragraphsAfter: ''
     };
-    let current = node.parent;
-    while (current && current.type !== 'PAGE') {
-        if (current.type === 'FRAME' || current.type === 'SECTION' || current.type === 'COMPONENT') {
-            context.frameName = current.name;
-            break;
-        }
-        current = current.parent;
-    }
+    const pageFrame = topLevelOf(node);
+    context.frameName = pageFrame.id !== node.id ? pageFrame.name : '';
     if ('reactions' in node && node.reactions && node.reactions.length > 0) {
         for (const reaction of node.reactions) {
             if (reaction.action) {
@@ -72,29 +66,46 @@ function extractNodeContext(node) {
             context.destination = node.name;
         }
     }
-    if (node.parent && 'children' in node.parent) {
-        const textNodes = [];
-        for (const child of node.parent.children) {
-            if (child.type === 'TEXT' && child.characters && child.characters.trim().length > 10) {
-                textNodes.push(child);
+    const imgBox = node.absoluteBoundingBox;
+    if (imgBox) {
+        const scope = pageFrame.id !== node.id && 'findAllWithCriteria' in pageFrame ? pageFrame : figma.currentPage;
+        const imgRight = imgBox.x + imgBox.width;
+        const imgBottom = imgBox.y + imgBox.height;
+        const above = [];
+        const below = [];
+        for (const t of scope.findAllWithCriteria({ types: ['TEXT'] })) {
+            const text = t.characters ? t.characters.trim() : '';
+            const tb = t.absoluteBoundingBox;
+            if (text.length <= 10 || !tb || !isShown(t) || isPollyNode(t))
+                continue;
+            let inside = false;
+            for (let p = t.parent; p && p.type !== 'PAGE'; p = p.parent) {
+                if (p.id === node.id) {
+                    inside = true;
+                    break;
+                }
+            }
+            if (inside)
+                continue;
+            if (tb.x + tb.width <= imgBox.x || tb.x >= imgRight)
+                continue;
+            if (tb.y + tb.height <= imgBox.y + 15) {
+                const gap = imgBox.y - (tb.y + tb.height);
+                if (gap <= 600)
+                    above.push({ text, gap });
+            }
+            else if (tb.y >= imgBottom - 15) {
+                const gap = tb.y - imgBottom;
+                if (gap <= 600)
+                    below.push({ text, gap });
             }
         }
-        textNodes.sort((a, b) => a.y - b.y);
-        const beforeTexts = [];
-        const afterTexts = [];
-        for (const t of textNodes) {
-            const text = t.characters.trim();
-            if (t.y + t.height <= node.y + 15) {
-                beforeTexts.push(text);
-            }
-            else if (t.y >= node.y + node.height - 15) {
-                afterTexts.push(text);
-            }
-        }
-        if (beforeTexts.length > 0)
-            context.paragraphsBefore = beforeTexts.slice(-2).join('\n\n');
-        if (afterTexts.length > 0)
-            context.paragraphsAfter = afterTexts.slice(0, 2).join('\n\n');
+        above.sort((a, b) => b.gap - a.gap);
+        below.sort((a, b) => a.gap - b.gap);
+        if (above.length > 0)
+            context.paragraphsBefore = above.slice(-2).map(a => a.text).join('\n\n');
+        if (below.length > 0)
+            context.paragraphsAfter = below.slice(0, 2).map(a => a.text).join('\n\n');
     }
     return context;
 }
