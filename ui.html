@@ -200,6 +200,7 @@
         font-size: 12px;
       }
       .polly-missing-count { font-weight: 600; color: #2c3338; }
+      .polly-follow { display: flex; align-items: center; gap: 4px; color: #2c3338; cursor: pointer; }
       .polly-status { flex-basis: 100%; font-weight: 600; color: #088908; }
       .polly-status:empty { display: none; }
       .polly-auto-advance { margin-left: auto; display: flex; align-items: center; gap: 4px; color: #2c3338; cursor: pointer; }
@@ -407,6 +408,7 @@
       <button type="button" id="polly-next-btn" class="polly-nav-btn">⏭️ Next image missing alt</button>
       <span id="polly-missing-count" class="polly-missing-count" role="status" aria-live="polite"></span>
       <label class="polly-auto-advance"><input type="checkbox" id="polly-auto-advance" checked> Auto-advance</label>
+      <label class="polly-follow"><input type="checkbox" id="polly-follow-image" checked> Follow image</label>
       <span id="polly-status" class="polly-status" role="status" aria-live="polite"></span>
     </div>
 
@@ -994,6 +996,7 @@
           if (currentNode && currentNode.nodeId === forNodeId) {
             renderChoiceCards(choices, currentNode.existingAlt);
             suggestionsNodeId = forNodeId;
+            requestAnimationFrame(scrollToSuggestions);
           }
         } catch (err) {
           alert('🦜 Polly squawked with an error: ' + err.message);
@@ -1013,6 +1016,31 @@
       document.getElementById('polly-auto-advance').onchange = (e) => {
         parent.postMessage({ pluginMessage: { type: 'SET_AUTO_ADVANCE', value: e.target.checked } }, '*');
       };
+
+      document.getElementById('polly-follow-image').onchange = (e) => {
+        parent.postMessage({ pluginMessage: { type: 'SET_FOLLOW_IMAGE', value: e.target.checked } }, '*');
+      };
+
+      function scrollToSuggestions() {
+        const panel = document.getElementById('polly-main-panel');
+        const cards = Array.from(document.querySelectorAll('.polly-choice-item'));
+        const fresh = cards.filter(c => !c.querySelector('.polly-tag-original'));
+        const first = fresh[0] || cards[0];
+        if (!first) return;
+
+        const pinned = document.getElementById('polly-stadium-container');
+        const pinnedHeight = pinned && pinned.style.display !== 'none' ? pinned.offsetHeight : 0;
+        const top = first.getBoundingClientRect().top - panel.getBoundingClientRect().top + panel.scrollTop - pinnedHeight - 14;
+        const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        panel.scrollTo({ top: Math.max(0, top), behavior: reduceMotion ? 'auto' : 'smooth' });
+
+        const status = document.getElementById('polly-status');
+        if (status) {
+          status.textContent = (fresh.length || cards.length) + ' suggestions ready below';
+          clearTimeout(status._t);
+          status._t = setTimeout(() => { status.textContent = ''; }, 4000);
+        }
+      }
 
       function pulseGenerateButton() {
         const btn = document.getElementById('polly-generate-btn');
@@ -1119,6 +1147,10 @@
         if (msg.type === 'MISSING_COUNT') {
           document.getElementById('polly-missing-count').textContent = msg.count === 0 ? 'All images described 🎉' : msg.count + ' missing alt';
           document.getElementById('polly-next-btn').disabled = msg.count === 0;
+        }
+
+        if (msg.type === 'FOLLOW_LOADED') {
+          document.getElementById('polly-follow-image').checked = msg.value;
         }
 
         if (msg.type === 'AUTO_ADVANCE_LOADED') {

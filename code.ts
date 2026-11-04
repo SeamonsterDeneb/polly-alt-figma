@@ -7,10 +7,15 @@ figma.showUI(__html__, {
   themeColors: true
 });
 
+let uiWidth = 440;
+let uiHeight = 620;
+
 // Restore saved window dimensions
 figma.clientStorage.getAsync('polly_window_size').then(size => {
   if (size && size.width && size.height) {
     figma.ui.resize(size.width, size.height);
+    uiWidth = size.width;
+    uiHeight = size.height;
   }
 }).catch(() => {});
 
@@ -110,8 +115,11 @@ function extractNodeContext(node: SceneNode) {
   return context;
 }
 
+let selectionSeq = 0;
+
 // Send current selection state to UI
 async function sendCurrentSelection() {
+  const seq = ++selectionSeq;
   const selection = figma.currentPage.selection;
   if (selection.length === 0) {
     figma.ui.postMessage({ type: 'SELECTION_CLEARED' });
@@ -127,7 +135,8 @@ async function sendCurrentSelection() {
     if (realImageNode && !realImageNode.removed) {
       figma.currentPage.selection = [realImageNode];
       figma.ui.postMessage({ type: 'PULSE_GENERATE' });
-      return;
+      if (followImage) placePanelBesideImage(realImageNode);
+      node = realImageNode;
     }
   }
 
@@ -160,6 +169,8 @@ async function sendCurrentSelection() {
     }
   }
 
+  if (seq !== selectionSeq || node.removed) return;
+
   const existingAlt = node.getPluginData('polly_alt') || '';
   const isDecorative = node.getPluginData('polly_is_decorative') === 'true';
   const context = extractNodeContext(node);
@@ -191,6 +202,7 @@ let advanceTimer: any = null;
 let focusRingId: string | null = null;
 let focusTargetId: string | null = null;
 let focusPulseTimer: any = null;
+let followImage = true;
 
 async function waitForImageFill(node: BaseNode, tries = 12): Promise<boolean> {
   for (let i = 0; i < tries; i++) {
@@ -407,6 +419,44 @@ function bringIntoView(node: SceneNode) {
   if (figma.viewport.zoom > 1) figma.viewport.zoom = 1;
 }
 
+function placePanelBesideImage(node: SceneNode) {
+  const box = node.absoluteBoundingBox;
+  if (!box) return;
+
+  try {
+    const z = figma.viewport.zoom;
+    const v = figma.viewport.bounds;
+    const gap = 24 / z;
+    const margin = 8 / z;
+    const panelW = uiWidth / z;
+    const panelH = (uiHeight + 48) / z;
+
+    const roomRight = (v.x + v.width) - (box.x + box.width) - gap - margin;
+    const roomLeft = box.x - gap - margin - v.x;
+    const rightX = box.x + box.width + gap;
+    const leftX = box.x - gap - panelW;
+
+    let x: number;
+    if (roomRight >= panelW && roomLeft >= panelW) {
+      const current = figma.ui.getPosition().canvasSpace.x;
+      x = Math.abs(rightX - current) <= Math.abs(leftX - current) ? rightX : leftX;
+    } else if (roomRight >= panelW) {
+      x = rightX;
+    } else if (roomLeft >= panelW) {
+      x = leftX;
+    } else {
+      x = roomRight >= roomLeft ? v.x + v.width - panelW - margin : v.x + margin;
+    }
+
+    x = Math.max(v.x + margin, Math.min(x, v.x + v.width - panelW - margin));
+    const y = Math.max(v.y + margin, Math.min(box.y, v.y + v.height - panelH - margin));
+
+    figma.ui.reposition(x, y);
+  } catch (e) {
+    console.error('Could not move the Polly panel', e);
+  }
+}
+
 async function goToNextMissing(): Promise<boolean> {
   const sel = figma.currentPage.selection[0];
   let fromId: string | null = sel ? sel.id : null;
@@ -437,6 +487,10 @@ async function goToNextMissing(): Promise<boolean> {
   showFocusRing(next);
   figma.ui.postMessage({ type: 'PULSE_GENERATE' });
   sendMissingCount();
+  if (followImage) {
+    await new Promise(r => setTimeout(r, 120));
+    placePanelBesideImage(next);
+  }
   return true;
 }
 
@@ -754,12 +808,14 @@ figma.on('selectionchange', () => {
   if (sel && Date.now() - lastCreateAt < 3000) {
     waitForImageFill(sel).then(ok => { if (ok) checkAndSquawkNewImage(sel); }).catch(e => console.error('Squawk failed', e));
   }
-  sendCurrentSelection();
+  sendCurrentSelection().catch(e => console.error('Selection update failed', e));
 });
 
 figma.ui.onmessage = async (msg) => {
   if (msg.type === 'RESIZE_WINDOW') {
     figma.ui.resize(msg.width, msg.height);
+    uiWidth = msg.width;
+    uiHeight = msg.height;
     figma.clientStorage.setAsync('polly_window_size', { width: msg.width, height: msg.height }).catch(() => {});
   }
 
@@ -779,6 +835,9 @@ figma.ui.onmessage = async (msg) => {
     const storedAdvance = await figma.clientStorage.getAsync('polly_auto_advance');
     autoAdvance = storedAdvance !== false;
     figma.ui.postMessage({ type: 'AUTO_ADVANCE_LOADED', value: autoAdvance });
+    const storedFollow = await figma.clientStorage.getAsync('polly_follow_image');
+    followImage = storedFollow !== false;
+    figma.ui.postMessage({ type: 'FOLLOW_LOADED', value: followImage });
     sendCurrentSelection();
     squawkAllMissingAlt().then(() => { setStatus(''); sendMissingCount(); }).catch(e => { setStatus(''); console.error('Squawk scan failed', e); });
     runPollyDiagnostic();
@@ -786,6 +845,15 @@ figma.ui.onmessage = async (msg) => {
 
   if (msg.type === 'NEXT_MISSING') {
     goToNextMissing().catch(e => console.error('Next image failed', e));
+  }
+
+  if (msg.type === 'PROBE') {
+    runPositionProbe({ width: msg.width, height: msg.height }).catch(e => console.error('Probe failed', e));
+  }
+
+  if (msg.type === 'SET_FOLLOW_IMAGE') {
+    followImage = !!msg.value;
+    figma.clientStorage.setAsync('polly_follow_image', followImage).catch(() => {});
   }
 
   if (msg.type === 'SET_AUTO_ADVANCE') {
@@ -933,35 +1001,45 @@ figma.ui.onmessage = async (msg) => {
       }
     }
 
-    const placeOnLeft = (rightObstacleDist < cardWidth + 80) && (leftObstacleDist > rightObstacleDist);
-    const targetX = placeOnLeft ? (rootX - cardWidth - 60) : (rootX + rootWidth + 60);
-
-    let targetY = targetY_ideal;
-
-    const existingCards = figma.currentPage.findAll(n =>
-      n.id !== card.id &&
-      n.getPluginData('polly_is_margin_card') === 'true' &&
-      Math.abs(n.x - targetX) < 100
+    const needed = cardWidth + 100;
+    const imgCenterX = imageBounds ? imageBounds.x + imageBounds.width / 2 : rootX + rootWidth / 2;
+    const imgCenterY = imageBounds ? imageBounds.y + imageBounds.height / 2 : targetY_ideal;
+    const annotationLayer = findAnnotationLayer();
+    const placedCards = (annotationLayer ? annotationLayer.children : []).filter(n =>
+      n.id !== card.id && n.getPluginData('polly_is_margin_card') === 'true'
     ) as FrameNode[];
 
-    existingCards.sort((a, b) => a.y - b.y);
-
-    let hasCollision = true;
-    while (hasCollision) {
-      hasCollision = false;
-      for (const ec of existingCards) {
-        const ecTop = ec.y;
-        const ecBottom = ec.y + ec.height + 40;
-        if (targetY >= ecTop - 30 && targetY < ecBottom) {
-          targetY = ecBottom;
-          hasCollision = true;
-          break;
+    const placeOn = (onLeft: boolean) => {
+      const x = onLeft ? rootX - cardWidth - 60 : rootX + rootWidth + 60;
+      const sameColumn = placedCards.filter(n => Math.abs(n.x - x) < 100).sort((a, b) => a.y - b.y);
+      let y = targetY_ideal;
+      let hasCollision = true;
+      while (hasCollision) {
+        hasCollision = false;
+        for (const ec of sameColumn) {
+          if (y >= ec.y - 30 && y < ec.y + ec.height + 40) {
+            y = ec.y + ec.height + 40;
+            hasCollision = true;
+            break;
+          }
         }
       }
-    }
+      const distance = Math.hypot(x + cardWidth / 2 - imgCenterX, y + (card.height || 120) / 2 - imgCenterY);
+      return { x, y, distance };
+    };
 
-    card.x = targetX;
-    card.y = targetY;
+    const left = placeOn(true);
+    const right = placeOn(false);
+    const leftFree = leftObstacleDist >= needed;
+    const rightFree = rightObstacleDist >= needed;
+
+    let choice = right;
+    if (leftFree && rightFree) choice = left.distance < right.distance - 20 ? left : right;
+    else if (leftFree) choice = left;
+    else if (!rightFree && leftObstacleDist > rightObstacleDist) choice = left;
+
+    card.x = choice.x;
+    card.y = choice.y;
     card.setPluginData('polly_is_margin_card', 'true');
     card.setPluginData('polly_source_image_id', node.id);
 
