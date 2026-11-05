@@ -158,7 +158,7 @@ async function sendCurrentSelection() {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const previewBytes = await node.exportAsync({
-          format: 'JPG',
+          format: 'PNG',
           constraint: { type: 'WIDTH', value: 800 }
         });
         previewBase64 = uint8ArrayToBase64(previewBytes);
@@ -295,7 +295,7 @@ function syncOverlays() {
   for (const o of layer.children.slice() as FrameNode[]) {
     if (o.getPluginData('polly_is_squawk_overlay') !== 'true' && o.getPluginData('polly_is_deco_overlay') !== 'true') continue;
     const target = figma.getNodeById(o.getPluginData('polly_target_image_id')) as SceneNode | null;
-    if (!target || target.removed) {
+    if (!target || target.removed || target.getPluginData('polly_alt') || target.getPluginData('polly_is_decorative') === 'true') {
       o.remove();
       continue;
     }
@@ -303,9 +303,12 @@ function syncOverlays() {
     if (!b) continue;
     const shown = isShown(target);
     if (o.visible !== shown) o.visible = shown;
-    if (Math.abs(o.x - b.x) > 0.5 || Math.abs(o.y - b.y) > 0.5) {
-      o.x = b.x;
-      o.y = b.y;
+    const layer = findAnnotationLayer();
+    const targetX = b.x - (layer ? layer.x : 0);
+    const targetY = b.y - (layer ? layer.y : 0);
+    if (Math.abs(o.x - targetX) > 0.5 || Math.abs(o.y - targetY) > 0.5) {
+      o.x = targetX;
+      o.y = targetY;
     }
     if (Math.abs(o.width - b.width) > 0.5 || Math.abs(o.height - b.height) > 0.5) {
       o.resize(Math.max(b.width, 1), Math.max(b.height, 1));
@@ -642,8 +645,9 @@ async function createScrimOverlay(imgNode: SceneNode, kind: 'squawk' | 'decorati
   }
 
   addToAnnotationLayer(overlay, reveal);
-  overlay.x = b.x;
-  overlay.y = b.y;
+  const layer = findAnnotationLayer();
+  overlay.x = b.x - (layer ? layer.x : 0);
+  overlay.y = b.y - (layer ? layer.y : 0);
 }
 
 async function createSquawkOverlay(imgNode: SceneNode, reveal = true) {
@@ -870,10 +874,11 @@ figma.ui.onmessage = async (msg) => {
     const selection = figma.currentPage.selection;
     if (selection.length === 0) return;
 
-    const node = selection[0];
+    const requested = msg.nodeId ? figma.getNodeById(msg.nodeId) : null;
+    const node = (requested && !requested.removed ? requested : selection[0]) as SceneNode;
     try {
       const bytes = await node.exportAsync({
-        format: 'JPG',
+        format: 'PNG',
         constraint: { type: 'WIDTH', value: 1024 }
       });
 
@@ -883,7 +888,8 @@ figma.ui.onmessage = async (msg) => {
         type: 'IMAGE_DATA_READY',
         data: {
           base64,
-          mimeType: 'image/jpeg'
+          nodeId: node.id,
+          mimeType: 'image/png'
         }
       });
     } catch (err: any) {
@@ -1069,7 +1075,8 @@ figma.ui.onmessage = async (msg) => {
     const selection = figma.currentPage.selection;
     if (selection.length === 0) return;
 
-    const node = selection[0];
+    const requestedNode = msg.data.nodeId ? figma.getNodeById(msg.data.nodeId) : null;
+    const node = (requestedNode && !requestedNode.removed ? requestedNode : selection[0]) as SceneNode;
     const { altText, isDecorative, explanation } = msg.data;
 
     // Remove the Squawk Curtain now that the image is described

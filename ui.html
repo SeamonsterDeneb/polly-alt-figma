@@ -81,7 +81,7 @@
         z-index: 10;
         height: 34vh;
         margin: 0 0 14px 0;
-        background: #111111;
+        background: #7f848b;
         overflow: hidden;
         border-bottom: 1px solid var(--polly-border);
         box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
@@ -741,7 +741,7 @@
         genBtn.disabled = true;
         startTipRotator();
 
-        parent.postMessage({ pluginMessage: { type: 'REQUEST_IMAGE_DATA' } }, '*');
+        parent.postMessage({ pluginMessage: { type: 'REQUEST_IMAGE_DATA', nodeId: currentNode.nodeId } }, '*');
       };
 
       document.getElementById('polly-deco-check').onchange = (e) => {
@@ -749,7 +749,7 @@
           parent.postMessage({
             pluginMessage: {
               type: 'APPLY_ALT_TEXT',
-              data: { altText: '', isDecorative: true, explanation: '' }
+              data: { nodeId: currentNode.nodeId, altText: '', isDecorative: true, explanation: '' }
             }
           }, '*');
         } else {
@@ -843,7 +843,7 @@
             parent.postMessage({
               pluginMessage: {
                 type: 'APPLY_ALT_TEXT',
-                data: { altText: finalVal, isDecorative: false, explanation: opt.explanation || '' }
+                data: { nodeId: currentNode.nodeId, altText: finalVal, isDecorative: false, explanation: opt.explanation || '' }
               }
             }, '*');
 
@@ -1194,7 +1194,7 @@
           const stadiumBox = document.getElementById('polly-stadium-container');
           const stadiumImg = document.getElementById('polly-stadium-img');
           if (currentNode.previewBase64) {
-            stadiumImg.src = `data:image/jpeg;base64,${currentNode.previewBase64}`;
+            stadiumImg.src = `data:image/png;base64,${currentNode.previewBase64}`;
             stadiumBox.style.display = 'flex';
           } else {
             stadiumBox.style.display = 'none';
@@ -1244,7 +1244,7 @@
         }
 
         if (msg.type === 'IMAGE_DATA_READY') {
-          if (currentNode && currentNode.nodeId === generatingNodeId) {
+          if (currentNode && currentNode.nodeId === generatingNodeId && (!msg.data.nodeId || msg.data.nodeId === generatingNodeId)) {
             generatePollyAlt(msg.data);
           } else {
             generating = false;
