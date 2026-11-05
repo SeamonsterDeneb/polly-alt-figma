@@ -15,6 +15,11 @@
       }
 
       * { box-sizing: border-box; margin: 0; padding: 0; }
+      #polly-collapsed-btn { display: none; }
+      body.collapsed { padding: 0; }
+      body.collapsed > * { display: none !important; }
+      body.collapsed > #polly-collapsed-btn { display: flex !important; width: 100vw; height: 100vh; align-items: center; justify-content: center; position: relative; border: none; background: var(--polly-blue); color: #fff; font-size: 26px; cursor: pointer; }
+      #polly-collapsed-badge { position: absolute; top: 3px; right: 3px; min-width: 18px; padding: 1px 4px; border-radius: 9px; background: var(--polly-red); color: #fff; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
 
       body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -395,12 +400,14 @@
     </style>
   </head>
   <body>
+    <button type="button" id="polly-collapsed-btn" aria-label="Open Polly Alt">🦜<span id="polly-collapsed-badge" aria-hidden="true"></span></button>
 
     <div class="polly-top-bar">
       <div class="polly-title">🦜 Polly Alt</div>
       <div style="display: flex; gap: 6px;">
         <button type="button" id="polly-toggle-badges-btn" class="polly-nav-btn">👁️ Annotations</button>
         <button type="button" id="polly-toggle-settings" class="polly-nav-btn">⚙️ Settings</button>
+        <button type="button" id="polly-collapse-btn" class="polly-nav-btn">Minimize</button>
       </div>
     </div>
 
@@ -1147,6 +1154,10 @@
         if (msg.type === 'MISSING_COUNT') {
           document.getElementById('polly-missing-count').textContent = msg.count === 0 ? 'All images described 🎉' : msg.count + ' missing alt';
           document.getElementById('polly-next-btn').disabled = msg.count === 0;
+          const cb = document.getElementById('polly-collapsed-badge');
+          cb.textContent = msg.count === 0 ? '✓' : msg.count;
+          cb.style.background = msg.count === 0 ? '#088908' : '#d63638';
+          document.getElementById('polly-collapsed-btn').setAttribute('aria-label', msg.count === 0 ? 'Open Polly Alt. All images described' : 'Open Polly Alt. ' + msg.count + ' images missing alt');
         }
 
         if (msg.type === 'FOLLOW_LOADED') {
@@ -1155,6 +1166,10 @@
 
         if (msg.type === 'AUTO_ADVANCE_LOADED') {
           document.getElementById('polly-auto-advance').checked = msg.value;
+        }
+
+        if (msg.type === 'COLLAPSED') {
+          document.body.classList.toggle('collapsed', msg.value);
         }
 
         if (msg.type === 'PULSE_GENERATE') {
@@ -1292,6 +1307,8 @@
       };
 
       // Initialize
+      document.getElementById('polly-collapsed-btn').onclick = () => parent.postMessage({ pluginMessage: { type: 'EXPAND' } }, '*');
+      document.getElementById('polly-collapse-btn').onclick = () => parent.postMessage({ pluginMessage: { type: 'COLLAPSE' } }, '*');
       prepareSquawks();
       parent.postMessage({ pluginMessage: { type: 'INIT' } }, '*');
     </script>

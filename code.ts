@@ -135,6 +135,7 @@ async function sendCurrentSelection() {
     if (realImageNode && !realImageNode.removed) {
       figma.currentPage.selection = [realImageNode];
       figma.ui.postMessage({ type: 'PULSE_GENERATE' });
+      setCollapsed(false);
       if (followImage) placePanelBesideImage(realImageNode);
       node = realImageNode;
     }
@@ -203,6 +204,18 @@ let focusRingId: string | null = null;
 let focusTargetId: string | null = null;
 let focusPulseTimer: any = null;
 let followImage = true;
+let collapsed = false;
+const COLLAPSED_SIZE = 56;
+function setCollapsed(c: boolean) {
+  if (c === collapsed) return;
+  collapsed = c;
+  if (c) {
+    figma.ui.resize(COLLAPSED_SIZE, COLLAPSED_SIZE);
+    const z = figma.viewport.zoom, v = figma.viewport.bounds;
+    figma.ui.reposition(v.x + 12 / z, v.y + 12 / z);
+  } else figma.ui.resize(uiWidth, uiHeight);
+  figma.ui.postMessage({ type: 'COLLAPSED', value: c });
+}
 
 async function waitForImageFill(node: BaseNode, tries = 12): Promise<boolean> {
   for (let i = 0; i < tries; i++) {
@@ -249,6 +262,11 @@ function clearPollyAnnotations(node: SceneNode) {
     if (target && !target.removed) target.remove();
     node.setPluginData(key, '');
   }
+}
+
+function resetCopiedAlt(node: SceneNode) {
+  for (const key of ['polly_alt', 'polly_is_decorative', 'polly_margin_note_id', 'polly_margin_line_id', 'polly_margin_halo_id', 'polly_margin_dot_id', 'polly_deco_overlay_id', 'polly_squawk_overlay_id', 'polly_badge_id']) node.setPluginData(key, '');
+  if ('annotations' in node) node.annotations = node.annotations.filter(a => !(a.labelMarkdown || '').startsWith('**Accessibility'));
 }
 
 async function createDecorativeOverlay(imgNode: SceneNode) {
@@ -481,6 +499,7 @@ async function goToNextMissing(): Promise<boolean> {
       ? '🦜 This is the only image missing alt text.'
       : '🦜 Every image on this page has alt text!');
     sendMissingCount();
+    if (missingImages().length === 0) setTimeout(() => setCollapsed(true), 1200);
     return false;
   }
 
@@ -681,6 +700,7 @@ async function checkAndSquawkNewImage(node: BaseNode) {
       setTimeout(() => recentlySquawked.delete(node.id), 8000);
 
       // 1. Plant the Squawk Curtain on canvas
+      setCollapsed(false);
       await createSquawkOverlay(node as SceneNode);
 
       // 2. Focus layer & send data to Polly
@@ -706,7 +726,7 @@ figma.on('documentchange', (event) => {
       const node = (change as any).node;
       if (node && !node.removed && !isPollyNode(node)) {
         lastCreateAt = Date.now();
-        waitForImageFill(node).then(ok => { if (ok) checkAndSquawkNewImage(node); }).catch(e => console.error('Squawk failed', e));
+        waitForImageFill(node).then(ok => { if (ok) { resetCopiedAlt(node); checkAndSquawkNewImage(node); } }).catch(e => console.error('Squawk failed', e));
       }
     } else if (change.type === 'PROPERTY_CHANGE') {
       const node = (change as any).node;
@@ -843,9 +863,12 @@ figma.ui.onmessage = async (msg) => {
     followImage = storedFollow !== false;
     figma.ui.postMessage({ type: 'FOLLOW_LOADED', value: followImage });
     sendCurrentSelection();
-    squawkAllMissingAlt().then(() => { setStatus(''); sendMissingCount(); }).catch(e => { setStatus(''); console.error('Squawk scan failed', e); });
+    squawkAllMissingAlt().then(() => { setStatus(''); sendMissingCount(); setCollapsed(missingImages().length === 0); }).catch(e => { setStatus(''); console.error('Squawk scan failed', e); });
     runPollyDiagnostic();
   }
+
+  if (msg.type === 'EXPAND') setCollapsed(false);
+  if (msg.type === 'COLLAPSE') setCollapsed(true);
 
   if (msg.type === 'NEXT_MISSING') {
     goToNextMissing().catch(e => console.error('Next image failed', e));
@@ -1119,6 +1142,7 @@ figma.ui.onmessage = async (msg) => {
       }, 1500);
     } else {
       scheduleOverlaySync();
+      setTimeout(() => setCollapsed(true), 1200);
     }
   }
 };
