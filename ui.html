@@ -130,6 +130,13 @@
         display: block;
         animation: toastPulse 1s ease-in-out 3;
       }
+      .polly-added-overlay { position: fixed; display: none; z-index: 20; align-items: center; justify-content: center; padding: 16px; text-align: center; background: rgba(6, 102, 6, 0.94); color: #ffffff; font-size: 14px; font-weight: 600; line-height: 1.45; pointer-events: none; }
+      .polly-added-overlay.active { display: flex; animation: addedPulse 1s ease-in-out 3; }
+      @keyframes addedPulse { 0%, 100% { box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 1); } 50% { box-shadow: inset 0 0 0 12px rgba(255, 255, 255, 0.35); } }
+      .polly-added-overlay { padding: 16px 44px; }
+      .polly-added-close { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border: 2px solid #ffffff; border-radius: 50%; background: transparent; color: #ffffff; font-size: 18px; line-height: 1; cursor: pointer; pointer-events: auto; }
+      .polly-added-close:hover, .polly-added-close:focus-visible { background: rgba(255, 255, 255, 0.25); }
+      @media (prefers-reduced-motion: reduce) { .polly-added-overlay.active { animation: none; } }
       @keyframes toastPulse {
         0%, 100% { box-shadow: 0 0 0 0 rgba(8, 137, 8, 0.6); }
         50% { box-shadow: 0 0 0 6px rgba(8, 137, 8, 0); }
@@ -513,6 +520,7 @@
       </div>
 
     </div>
+    <div id="polly-added-overlay" class="polly-added-overlay"><span id="polly-added-text" role="status"></span><button type="button" id="polly-added-close" class="polly-added-close" aria-label="Dismiss message">×</button></div>
     <!-- Resize Grip -->
     <div id="polly-resize-handle" class="polly-resize-handle" title="Drag to resize">
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -1049,6 +1057,23 @@
         }
       }
 
+      function showAddedOverlay(long) {
+        const box = document.getElementById('polly-stadium-container');
+        const overlay = document.getElementById('polly-added-overlay');
+        const r = box.getBoundingClientRect();
+        if (box.style.display === 'none' || !r.height) return;
+        overlay.style.left = r.left + 'px';
+        overlay.style.top = r.top + 'px';
+        overlay.style.width = r.width + 'px';
+        overlay.style.height = r.height + 'px';
+        document.getElementById('polly-added-text').textContent = long ? "You added this image to have some effect on the people who see it. Let's add some alt text so it can have the same effect on the people who can't see it." : "Let's add some alt text!";
+        overlay.classList.remove('active');
+        void overlay.offsetWidth;
+        overlay.classList.add('active');
+        clearTimeout(overlay._t);
+        overlay._t = setTimeout(() => overlay.classList.remove('active'), 10000);
+      }
+
       function pulseGenerateButton() {
         const btn = document.getElementById('polly-generate-btn');
         btn.classList.remove('pulse');
@@ -1144,6 +1169,7 @@
           toast.classList.add('active');
           clearTimeout(toast._t);
           toast._t = setTimeout(() => toast.classList.remove('active'), 3000);
+          showAddedOverlay(msg.longMessage);
           pulseGenerateButton();
         }
 
@@ -1309,6 +1335,7 @@
       // Initialize
       document.getElementById('polly-collapsed-btn').onclick = () => parent.postMessage({ pluginMessage: { type: 'EXPAND' } }, '*');
       document.getElementById('polly-collapse-btn').onclick = () => parent.postMessage({ pluginMessage: { type: 'COLLAPSE' } }, '*');
+      document.getElementById('polly-added-close').onclick = () => document.getElementById('polly-added-overlay').classList.remove('active');
       prepareSquawks();
       parent.postMessage({ pluginMessage: { type: 'INIT' } }, '*');
     </script>

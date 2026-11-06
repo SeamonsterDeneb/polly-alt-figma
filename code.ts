@@ -673,6 +673,11 @@ async function createSquawkOverlay(imgNode: SceneNode, reveal = true) {
   await createScrimOverlay(imgNode, 'squawk', reveal);
 }
 
+function imageHashOf(node: BaseNode): string {
+  const fills = 'fills' in node && Array.isArray((node as any).fills) ? (node as any).fills : [];
+  return fills.filter((f: Paint) => f.type === 'IMAGE').map((f: any) => f.imageHash).join(',');
+}
+
 async function checkAndSquawkNewImage(node: BaseNode) {
   if (!node || node.removed) return;
   if (recentlySquawked.has(node.id)) return;
@@ -692,6 +697,18 @@ async function checkAndSquawkNewImage(node: BaseNode) {
   }
 
   if (hasImage) {
+    const hash = imageHashOf(node);
+    const savedHash = node.getPluginData('polly_image_hash');
+    if (savedHash && savedHash !== hash) {
+      clearPollyAnnotations(node as SceneNode);
+      node.setPluginData('polly_alt', '');
+      node.setPluginData('polly_is_decorative', 'false');
+      node.setPluginData('polly_image_hash', '');
+      if ('annotations' in node) node.annotations = node.annotations.filter(a => !(a.labelMarkdown || '').startsWith('**Accessibility'));
+      scheduleOverlaySync();
+    } else if (!savedHash && node.getPluginData('polly_alt')) {
+      node.setPluginData('polly_image_hash', hash);
+    }
     const existingAlt = node.getPluginData('polly_alt');
     const isDecorative = node.getPluginData('polly_is_decorative') === 'true';
 
@@ -709,9 +726,12 @@ async function checkAndSquawkNewImage(node: BaseNode) {
       await sendCurrentSelection();
 
       // 3. Trigger Polly Green pulsing toast inside plugin
+      const shownCount = (await figma.clientStorage.getAsync('polly_added_msg_count')) || 0;
+      figma.clientStorage.setAsync('polly_added_msg_count', shownCount + 1).catch(() => {});
       figma.ui.postMessage({
         type: 'SHOW_SQUAWK_TOAST',
-        nodeName: node.name
+        nodeName: node.name,
+        longMessage: shownCount < 3
       });
     }
   }
@@ -1107,6 +1127,7 @@ figma.ui.onmessage = async (msg) => {
 
     node.setPluginData('polly_alt', isDecorative ? '' : altText);
     node.setPluginData('polly_is_decorative', isDecorative ? 'true' : 'false');
+    node.setPluginData('polly_image_hash', imageHashOf(node));
 
     if ('annotations' in node) {
       const markdown = isDecorative

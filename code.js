@@ -677,6 +677,10 @@ async function createScrimOverlay(imgNode, kind, reveal = true) {
 async function createSquawkOverlay(imgNode, reveal = true) {
     await createScrimOverlay(imgNode, 'squawk', reveal);
 }
+function imageHashOf(node) {
+    const fills = 'fills' in node && Array.isArray(node.fills) ? node.fills : [];
+    return fills.filter((f) => f.type === 'IMAGE').map((f) => f.imageHash).join(',');
+}
 async function checkAndSquawkNewImage(node) {
     if (!node || node.removed)
         return;
@@ -693,6 +697,20 @@ async function checkAndSquawkNewImage(node) {
         hasImage = node.fills.some((f) => f.type === 'IMAGE');
     }
     if (hasImage) {
+        const hash = imageHashOf(node);
+        const savedHash = node.getPluginData('polly_image_hash');
+        if (savedHash && savedHash !== hash) {
+            clearPollyAnnotations(node);
+            node.setPluginData('polly_alt', '');
+            node.setPluginData('polly_is_decorative', 'false');
+            node.setPluginData('polly_image_hash', '');
+            if ('annotations' in node)
+                node.annotations = node.annotations.filter(a => !(a.labelMarkdown || '').startsWith('**Accessibility'));
+            scheduleOverlaySync();
+        }
+        else if (!savedHash && node.getPluginData('polly_alt')) {
+            node.setPluginData('polly_image_hash', hash);
+        }
         const existingAlt = node.getPluginData('polly_alt');
         const isDecorative = node.getPluginData('polly_is_decorative') === 'true';
         if (!existingAlt && !isDecorative) {
@@ -706,9 +724,12 @@ async function checkAndSquawkNewImage(node) {
             await new Promise(r => setTimeout(r, 150));
             await sendCurrentSelection();
             // 3. Trigger Polly Green pulsing toast inside plugin
+            const shownCount = (await figma.clientStorage.getAsync('polly_added_msg_count')) || 0;
+            figma.clientStorage.setAsync('polly_added_msg_count', shownCount + 1).catch(() => { });
             figma.ui.postMessage({
                 type: 'SHOW_SQUAWK_TOAST',
-                nodeName: node.name
+                nodeName: node.name,
+                longMessage: shownCount < 3
             });
         }
     }
@@ -1075,6 +1096,7 @@ figma.ui.onmessage = async (msg) => {
         removeSquawkOverlay(node);
         node.setPluginData('polly_alt', isDecorative ? '' : altText);
         node.setPluginData('polly_is_decorative', isDecorative ? 'true' : 'false');
+        node.setPluginData('polly_image_hash', imageHashOf(node));
         if ('annotations' in node) {
             const markdown = isDecorative
                 ? `**Accessibility:** Marked as **Decorative**`
