@@ -16,9 +16,17 @@
 
       * { box-sizing: border-box; margin: 0; padding: 0; }
       #polly-collapsed-btn { display: none; }
-      body.collapsed { padding: 0; }
+      body.collapsed { padding: 0; flex-direction: row; position: relative; }
+      #polly-peek { display: none; }
+      body.collapsed > #polly-peek { display: flex !important; position: absolute; left: 28px; top: 6px; bottom: 6px; right: 4px; align-items: center; padding: 0 10px 0 36px; border-radius: 0 8px 8px 0; background: var(--polly-green); color: #fff; font-size: 12px; font-weight: 600; line-height: 1.25; transform: translateX(-110%); opacity: 0; transition: transform 0.35s ease, opacity 0.35s ease; z-index: 1; }
+      body.collapsed > #polly-peek.out { transform: none; opacity: 1; }
+      #polly-collapsed-badge:empty { display: none; }
+      body.collapsed.peeking > #polly-collapsed-btn { width: 56px; }
+      #polly-collapsed-btn.pulse { animation: iconPulse 0.7s ease-in-out 2; }
+      @keyframes iconPulse { 0%, 100% { box-shadow: inset 0 0 0 0 rgba(255, 255, 255, 0.8); } 50% { box-shadow: inset 0 0 0 6px rgba(255, 255, 255, 0.6); } }
+      @media (prefers-reduced-motion: reduce) { body.collapsed > #polly-peek { transition: none; } #polly-collapsed-btn.pulse { animation: none; } }
       body.collapsed > * { display: none !important; }
-      body.collapsed > #polly-collapsed-btn { display: flex !important; width: 100vw; height: 100vh; align-items: center; justify-content: center; position: relative; border: none; background: var(--polly-blue); color: #fff; font-size: 26px; cursor: pointer; }
+      body.collapsed > #polly-collapsed-btn { display: flex !important; width: 100vw; flex: none; height: 100vh; align-items: center; justify-content: center; position: relative; z-index: 2;border: none; background: var(--polly-blue); color: #fff; font-size: 26px; cursor: pointer; }
       #polly-collapsed-badge { position: absolute; top: 3px; right: 3px; min-width: 18px; padding: 1px 4px; border-radius: 9px; background: var(--polly-red); color: #fff; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
 
       body {
@@ -157,21 +165,12 @@
       }
       .polly-context-badge-box strong { color: #1d2327; }
 
-      .polly-functional-badge {
-        background: #eef6fc;
-        border: 1px solid #c5dff5;
-        border-left: 4px solid var(--polly-blue);
-        padding: 8px 10px;
-        border-radius: 4px;
-        margin-bottom: 12px;
-        font-size: 11px;
-      }
-      .polly-functional-title {
-        font-weight: 700;
-        color: var(--polly-blue);
-        text-transform: uppercase;
-        margin-bottom: 3px;
-      }
+      .polly-role-box { min-width: 0; background: #eef6fc; border: 1px solid #c5dff5; border-left: 4px solid var(--polly-blue); border-radius: 4px; padding: 8px 10px; margin-bottom: 12px; font-size: 11px; }
+      .polly-role-box legend { font-weight: 700; color: var(--polly-blue); padding: 0 4px; }
+      .polly-role-options { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+      .polly-role-options label { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
+      .polly-role-dest { display: flex; align-items: center; gap: 6px; font-weight: 600; margin-bottom: 4px; }
+      .polly-role-dest input { flex: 1; padding: 5px 6px; border: 1px solid var(--polly-border); border-radius: 4px; font-size: 12px; font-family: inherit; }
 
       .polly-btn-primary {
         width: 100%;
@@ -406,8 +405,9 @@
 
     </style>
   </head>
-  <body>
+  <body class="collapsed">
     <button type="button" id="polly-collapsed-btn" aria-label="Open Polly Alt">🦜<span id="polly-collapsed-badge" aria-hidden="true"></span></button>
+    <div id="polly-peek" role="status"><span id="polly-peek-text"></span></div>
 
     <div class="polly-top-bar">
       <div class="polly-title">🦜 Polly Alt</div>
@@ -722,16 +722,22 @@
         box.innerHTML = '';
         if (!ctx) return;
 
-        if (ctx.isFunctional) {
-          const dest = ctx.destinationTitle || ctx.destination || 'Interactive Target';
-          const role = ctx.functionalRole === 'button' ? 'Action Button' : 'Link Destination';
-          box.innerHTML += `
-            <div class="polly-functional-badge">
-              <div class="polly-functional-title">🔗 ${role}</div>
-              <div>Functions as an interactive element targeting: <strong>${dest}</strong>.</div>
+        const role = ctx.isFunctional ? ctx.functionalRole : 'content';
+        const dest = (ctx.destinationTitle || ctx.destination || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        const roleChoices = [['content', 'Just an image'], ['link', 'Image link'], ['button', 'Image button']];
+        const roleNote = ctx.userRole
+          ? '<button type="button" id="polly-role-reset" class="polly-card-btn">Reset to Polly\'s guess</button>'
+          : (ctx.autoRole && ctx.autoRole !== 'content' ? 'Polly guessed this from the layer name or prototype link.' : '');
+        box.innerHTML += `
+          <fieldset class="polly-role-box">
+            <legend>What does this image do?</legend>
+            <div class="polly-role-options">
+              ${roleChoices.map(([v, l]) => `<label><input type="radio" name="polly-role" value="${v}"${v === role ? ' checked' : ''}> ${l}</label>`).join('')}
             </div>
-          `;
-        }
+            ${role === 'content' ? '' : `<label class="polly-role-dest">${role === 'link' ? 'Goes to' : 'Triggers'} <input type="text" id="polly-role-dest" value="${dest}" placeholder="${role === 'link' ? 'e.g. Donate page' : 'e.g. Opens the menu'}"></label>`}
+            ${roleNote ? `<div class="polly-help-text">${roleNote}</div>` : ''}
+          </fieldset>
+        `;
 
         if (ctx.frameName || ctx.paragraphsBefore || ctx.paragraphsAfter) {
           let html = '<div class="polly-context-badge-box">';
@@ -742,6 +748,37 @@
           box.innerHTML += html;
         }
       }
+
+      function saveRole(role, destination) {
+        const ctx = currentNode.context;
+        ctx.userRole = role;
+        ctx.isFunctional = role !== 'content';
+        ctx.functionalRole = ctx.isFunctional ? role : '';
+        if (destination !== undefined) {
+          ctx.destination = destination;
+          ctx.destinationTitle = '';
+        }
+        parent.postMessage({ pluginMessage: { type: 'SET_IMAGE_ROLE', nodeId: currentNode.nodeId, role, destination } }, '*');
+        if (suggestionsNodeId === currentNode.nodeId) clearSuggestions();
+      }
+
+      const contextPreview = document.getElementById('polly-context-preview');
+      contextPreview.addEventListener('change', (e) => {
+        if (!currentNode) return;
+        if (e.target.name === 'polly-role') {
+          saveRole(e.target.value);
+          renderContextPreview(currentNode.context);
+          const checked = contextPreview.querySelector('input[name="polly-role"]:checked');
+          if (checked) checked.focus();
+        } else if (e.target.id === 'polly-role-dest') {
+          saveRole(currentNode.context.functionalRole, e.target.value.trim());
+        }
+      });
+      contextPreview.addEventListener('click', (e) => {
+        if (e.target.id !== 'polly-role-reset' || !currentNode) return;
+        parent.postMessage({ pluginMessage: { type: 'SET_IMAGE_ROLE', nodeId: currentNode.nodeId, role: '', destination: '' } }, '*');
+        if (suggestionsNodeId === currentNode.nodeId) clearSuggestions();
+      });
 
       document.getElementById('polly-generate-btn').onclick = () => {
         if (!currentSettings.apiKey) {
@@ -948,7 +985,7 @@
         let prompt = '';
         if (ctx && ctx.isFunctional) {
           const role = ctx.functionalRole || 'link';
-          const dest = ctx.destinationTitle ? `"${ctx.destinationTitle}" (Target: ${ctx.destination})` : (ctx.destination || 'Action Target');
+          const dest = ctx.destination || ctx.destinationTitle || 'Action Target';
           prompt = `You are an accessibility expert writing functional alternative text for an image that acts as a ${role}.\n\n` +
             `FUNCTIONAL IMAGE CONTEXT:\n- Role: ${role}\n- Target/Destination: ${dest}\n${contextBlock}` +
             `Generate exactly ${currentSettings.choiceCount} concise alt text options following these strict rules:\n` +
@@ -1196,6 +1233,31 @@
 
         if (msg.type === 'COLLAPSED') {
           document.body.classList.toggle('collapsed', msg.value);
+          if (!msg.value) document.body.classList.remove('peeking');
+          if (!msg.value) {
+            const peekEl = document.getElementById('polly-peek');
+            clearTimeout(peekEl._t);
+            peekEl.classList.remove('out');
+          }
+        }
+
+        if (msg.type === 'PEEK') {
+          const peekEl = document.getElementById('polly-peek');
+          const icon = document.getElementById('polly-collapsed-btn');
+          document.getElementById('polly-peek-text').textContent = msg.text;
+          document.body.classList.add('peeking');
+          requestAnimationFrame(() => peekEl.classList.add('out'));
+          clearTimeout(peekEl._t);
+          peekEl._t = setTimeout(() => {
+            peekEl.classList.remove('out');
+            peekEl._t = setTimeout(() => {
+              parent.postMessage({ pluginMessage: { type: 'PEEK_DONE' } }, '*');
+              setTimeout(() => document.body.classList.remove('peeking'), 200);
+              icon.classList.remove('pulse');
+              void icon.offsetWidth;
+              icon.classList.add('pulse');
+            }, 400);
+          }, msg.duration || 5000);
         }
 
         if (msg.type === 'PULSE_GENERATE') {

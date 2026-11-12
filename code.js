@@ -2,18 +2,23 @@
 /// <reference types="@figma/plugin-typings" />
 // Polly Alt - Figma Canvas Engine
 figma.showUI(__html__, {
-    width: 440,
-    height: 620,
-    themeColors: true
+    width: 56,
+    height: 56,
+    themeColors: true,
+    position: {
+        x: figma.viewport.bounds.x + 12 / figma.viewport.zoom,
+        y: figma.viewport.bounds.y + 12 / figma.viewport.zoom
+    }
 });
 let uiWidth = 440;
 let uiHeight = 620;
 // Restore saved window dimensions
 figma.clientStorage.getAsync('polly_window_size').then(size => {
     if (size && size.width && size.height) {
-        figma.ui.resize(size.width, size.height);
         uiWidth = size.width;
         uiHeight = size.height;
+        if (!collapsed)
+            figma.ui.resize(size.width, size.height);
     }
 }).catch(() => { });
 function uint8ArrayToBase64(bytes) {
@@ -32,7 +37,9 @@ function extractNodeContext(node) {
         destination: '',
         destinationTitle: '',
         paragraphsBefore: '',
-        paragraphsAfter: ''
+        paragraphsAfter: '',
+        autoRole: '',
+        userRole: ''
     };
     const pageFrame = topLevelOf(node);
     context.frameName = pageFrame.id !== node.id ? pageFrame.name : '';
@@ -59,7 +66,7 @@ function extractNodeContext(node) {
     }
     const combinedNames = `${node.name} ${node.parent ? node.parent.name : ''}`.toLowerCase();
     if (!context.isFunctional) {
-        if (combinedNames.includes('btn') || combinedNames.includes('button') || combinedNames.includes('cta')) {
+        if (combinedNames.includes('btn') || combinedNames.includes('button') || /(^|[^a-z])cta/.test(combinedNames)) {
             context.isFunctional = true;
             context.functionalRole = 'button';
             context.destinationTitle = node.name;
@@ -69,6 +76,17 @@ function extractNodeContext(node) {
             context.functionalRole = 'link';
             context.destination = node.name;
         }
+    }
+    context.autoRole = context.isFunctional ? context.functionalRole : 'content';
+    context.userRole = node.getPluginData('polly_role');
+    if (context.userRole) {
+        context.isFunctional = context.userRole !== 'content';
+        context.functionalRole = context.isFunctional ? context.userRole : '';
+    }
+    const savedDest = node.getPluginData('polly_destination');
+    if (savedDest) {
+        context.destination = savedDest;
+        context.destinationTitle = '';
     }
     const imgBox = node.absoluteBoundingBox;
     if (imgBox) {
@@ -195,12 +213,21 @@ let focusRingId = null;
 let focusTargetId = null;
 let focusPulseTimer = null;
 let followImage = true;
-let collapsed = false;
+let collapsed = true;
 const COLLAPSED_SIZE = 56;
+let peeking = false;
+function peek(text) {
+    if (!collapsed)
+        return;
+    peeking = true;
+    figma.ui.resize(300, COLLAPSED_SIZE);
+    figma.ui.postMessage({ type: 'PEEK', text });
+}
 function setCollapsed(c) {
     if (c === collapsed)
         return;
     collapsed = c;
+    peeking = false;
     if (c) {
         figma.ui.resize(COLLAPSED_SIZE, COLLAPSED_SIZE);
         const z = figma.viewport.zoom, v = figma.viewport.bounds;
@@ -214,7 +241,7 @@ async function waitForImageFill(node, tries = 12) {
     for (let i = 0; i < tries; i++) {
         if (node.removed || !('fills' in node))
             return false;
-        if ('fills' in node && Array.isArray(node.fills) && node.fills.some((f) => f.type === 'IMAGE'))
+        if ('fills' in node && Array.isArray(node.fills) && node.fills.some(isLoadedImagePaint))
             return true;
         await new Promise(r => setTimeout(r, 250));
     }
@@ -296,7 +323,7 @@ function isUndescribedImage(n) {
     if (!('fills' in n) || isPollyNode(n) || !isShown(n))
         return false;
     const fills = n.fills;
-    if (!Array.isArray(fills) || !fills.some((f) => f.type === 'IMAGE' && f.visible !== false))
+    if (!Array.isArray(fills) || !fills.some((f) => f.type === 'IMAGE' && f.visible !== false && isLoadedImagePaint(f)))
         return false;
     return !n.getPluginData('polly_alt') && n.getPluginData('polly_is_decorative') !== 'true';
 }
@@ -677,6 +704,10 @@ async function createScrimOverlay(imgNode, kind, reveal = true) {
 async function createSquawkOverlay(imgNode, reveal = true) {
     await createScrimOverlay(imgNode, 'squawk', reveal);
 }
+const PLACEHOLDER_IMAGE_HASH = 'ece298d0ec2c16f10310d45724b276a6035cb503';
+function isLoadedImagePaint(p) {
+    return p.type === 'IMAGE' && !!p.imageHash && p.imageHash !== PLACEHOLDER_IMAGE_HASH;
+}
 function imageHashOf(node) {
     const fills = 'fills' in node && Array.isArray(node.fills) ? node.fills : [];
     return fills.filter((f) => f.type === 'IMAGE').map((f) => f.imageHash).join(',');
@@ -694,7 +725,7 @@ async function checkAndSquawkNewImage(node) {
     }
     let hasImage = false;
     if ('fills' in node && Array.isArray(node.fills)) {
-        hasImage = node.fills.some((f) => f.type === 'IMAGE');
+        hasImage = node.fills.some(isLoadedImagePaint);
     }
     if (hasImage) {
         const hash = imageHashOf(node);
@@ -875,18 +906,39 @@ figma.ui.onmessage = async (msg) => {
         followImage = storedFollow !== false;
         figma.ui.postMessage({ type: 'FOLLOW_LOADED', value: followImage });
         sendCurrentSelection();
-        squawkAllMissingAlt().then(() => { setStatus(''); sendMissingCount(); setCollapsed(missingImages().length === 0); }).catch(e => { setStatus(''); console.error('Squawk scan failed', e); });
+        squawkAllMissingAlt().then(() => {
+            setStatus('');
+            sendMissingCount();
+            const n = missingImages().length;
+            if (n > 0)
+                peek(n === 1 ? '1 image is missing alt text' : n + ' images are missing alt text');
+        }).catch(e => { setStatus(''); console.error('Squawk scan failed', e); });
         runPollyDiagnostic();
     }
     if (msg.type === 'EXPAND')
         setCollapsed(false);
+    if (msg.type === 'PEEK_DONE' && peeking) {
+        peeking = false;
+        if (collapsed)
+            figma.ui.resize(COLLAPSED_SIZE, COLLAPSED_SIZE);
+    }
     if (msg.type === 'COLLAPSE')
         setCollapsed(true);
     if (msg.type === 'NEXT_MISSING') {
         goToNextMissing().catch(e => console.error('Next image failed', e));
     }
-    if (msg.type === 'PROBE') {
-        runPositionProbe({ width: msg.width, height: msg.height }).catch(e => console.error('Probe failed', e));
+    // if (msg.type === 'PROBE') {
+    //   runPositionProbe({ width: msg.width, height: msg.height }).catch(e => console.error('Probe failed', e));
+    // }
+    if (msg.type === 'SET_IMAGE_ROLE') {
+        const target = figma.getNodeById(msg.nodeId);
+        if (!target || target.removed)
+            return;
+        target.setPluginData('polly_role', msg.role || '');
+        if (typeof msg.destination === 'string')
+            target.setPluginData('polly_destination', msg.destination);
+        if (!msg.role)
+            await sendCurrentSelection();
     }
     if (msg.type === 'SET_FOLLOW_IMAGE') {
         followImage = !!msg.value;
@@ -1005,39 +1057,47 @@ figma.ui.onmessage = async (msg) => {
         const rootWidth = 'width' in rootFrame ? rootFrame.width : 1200;
         const cardWidth = 280;
         const targetY_ideal = imageBounds ? imageBounds.y : ('y' in rootFrame ? rootFrame.y : 0);
-        let rightObstacleDist = Infinity;
-        let leftObstacleDist = Infinity;
+        const obstacles = [];
         for (const child of figma.currentPage.children) {
-            if (child.id === rootFrame.id || !('x' in child) || !('width' in child))
+            if (child.id === rootFrame.id || !child.visible)
                 continue;
             if (child.getPluginData('polly_is_margin_card') === 'true' || child.getPluginData('polly_is_guide_line') === 'true' || child.getPluginData('polly_is_annotation_layer') === 'true')
                 continue;
-            const childX = child.x;
-            const childY = child.y;
-            const childW = child.width;
             const childH = child.height || 1000;
-            const yOverlap = (childY < targetY_ideal + 300) && (childY + childH > targetY_ideal - 100);
+            const yOverlap = (child.y < targetY_ideal + 300) && (child.y + childH > targetY_ideal - 100);
             if (!yOverlap)
                 continue;
-            if (childX >= rootX + rootWidth - 20) {
-                const dist = childX - (rootX + rootWidth);
-                if (dist < rightObstacleDist)
-                    rightObstacleDist = dist;
-            }
-            if (childX + childW <= rootX + 20) {
-                const dist = rootX - (childX + childW);
-                if (dist < leftObstacleDist)
-                    leftObstacleDist = dist;
-            }
+            obstacles.push({ left: child.x, right: child.x + child.width });
         }
-        const needed = cardWidth + 100;
+        const MIN_CARD_W = 180;
+        const LANE_PAD = 30;
         const imgCenterX = imageBounds ? imageBounds.x + imageBounds.width / 2 : rootX + rootWidth / 2;
         const imgCenterY = imageBounds ? imageBounds.y + imageBounds.height / 2 : targetY_ideal;
         const annotationLayer = findAnnotationLayer();
         const placedCards = (annotationLayer ? annotationLayer.children : []).filter(n => n.id !== card.id && n.getPluginData('polly_is_margin_card') === 'true');
+        const findLane = (onLeft) => {
+            let cursor = onLeft ? rootX : rootX + rootWidth;
+            for (let i = 0; i < 100; i++) {
+                const blockers = onLeft ? obstacles.filter(o => o.left < cursor - 1) : obstacles.filter(o => o.right > cursor + 1);
+                if (blockers.length === 0)
+                    break;
+                const nearest = onLeft
+                    ? blockers.reduce((a, b) => (b.right > a.right ? b : a))
+                    : blockers.reduce((a, b) => (b.left < a.left ? b : a));
+                const avail = onLeft ? cursor - nearest.right - 2 * LANE_PAD : nearest.left - cursor - 2 * LANE_PAD;
+                if (avail >= MIN_CARD_W) {
+                    const width = Math.min(cardWidth, avail);
+                    return { width, x: onLeft ? cursor - LANE_PAD - width : cursor + LANE_PAD };
+                }
+                cursor = onLeft ? nearest.left : nearest.right;
+            }
+            return { width: cardWidth, x: onLeft ? cursor - LANE_PAD - cardWidth : cursor + LANE_PAD };
+        };
         const placeOn = (onLeft) => {
-            const x = onLeft ? rootX - cardWidth - 60 : rootX + rootWidth + 60;
-            const sameColumn = placedCards.filter(n => Math.abs(n.x - x) < 100).sort((a, b) => a.y - b.y);
+            const { width, x } = findLane(onLeft);
+            card.resize(width, card.height);
+            card.primaryAxisSizingMode = 'AUTO';
+            const sameColumn = placedCards.filter(n => n.x < x + width && n.x + n.width > x).sort((a, b) => a.y - b.y);
             let y = targetY_ideal;
             let hasCollision = true;
             while (hasCollision) {
@@ -1050,20 +1110,14 @@ figma.ui.onmessage = async (msg) => {
                     }
                 }
             }
-            const distance = Math.hypot(x + cardWidth / 2 - imgCenterX, y + (card.height || 120) / 2 - imgCenterY);
-            return { x, y, distance };
+            const distance = Math.hypot(x + width / 2 - imgCenterX, y + (card.height || 120) / 2 - imgCenterY);
+            return { x, y, width, distance };
         };
         const left = placeOn(true);
         const right = placeOn(false);
-        const leftFree = leftObstacleDist >= needed;
-        const rightFree = rightObstacleDist >= needed;
-        let choice = right;
-        if (leftFree && rightFree)
-            choice = left.distance < right.distance - 20 ? left : right;
-        else if (leftFree)
-            choice = left;
-        else if (!rightFree && leftObstacleDist > rightObstacleDist)
-            choice = left;
+        const choice = left.distance < right.distance - 20 ? left : right;
+        card.resize(choice.width, card.height);
+        card.primaryAxisSizingMode = 'AUTO';
         card.x = choice.x;
         card.y = choice.y;
         card.setPluginData('polly_is_margin_card', 'true');
