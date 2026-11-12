@@ -171,28 +171,15 @@ async function sendCurrentSelection() {
     hasImage = true;
   }
 
-  let previewBase64 = '';
-  if (hasImage) {
-    // Retry up to 3 times to allow newly dropped bitmaps to finish GPU rasterization
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const previewBytes = await node.exportAsync({
-          format: 'PNG',
-          constraint: { type: 'WIDTH', value: 800 }
-        });
-        previewBase64 = uint8ArrayToBase64(previewBytes);
-        if (previewBase64) break;
-      } catch (e) {
-        await new Promise(r => setTimeout(r, 180));
-      }
-    }
-  }
+  const cached = takePrefetched(node);
+  let previewBase64 = cached ? cached.preview : '';
+  if (hasImage && !previewBase64) previewBase64 = await exportPreview(node);
 
   if (seq !== selectionSeq || node.removed) return;
 
   const existingAlt = node.getPluginData('polly_alt') || '';
   const isDecorative = node.getPluginData('polly_is_decorative') === 'true';
-  const context = extractNodeContext(node);
+  const context = cached ? cached.context : extractNodeContext(node);
   const noteId = node.getPluginData('polly_margin_note_id');
   const isPinned = !!noteId && !!figma.getNodeById(noteId);
 
@@ -209,6 +196,7 @@ async function sendCurrentSelection() {
       previewBase64
     }
   });
+  schedulePrefetch();
 }
 
 let isSelfUpdating = false;
@@ -390,7 +378,10 @@ function byReadingOrder(a: SceneNode, b: SceneNode): number {
 }
 
 function missingImages(keepId: string | null = null): SceneNode[] {
-  const found = figma.currentPage.findAll(n => isUndescribedImage(n as SceneNode) || n.id === keepId) as SceneNode[];
+  if (!imageNodeCache) {
+    imageNodeCache = figma.currentPage.findAll(n => 'fills' in n && Array.isArray((n as any).fills) && (n as any).fills.some(isLoadedImagePaint)) as SceneNode[];
+  }
+  const found = imageNodeCache.filter(n => !n.removed && (isUndescribedImage(n) || n.id === keepId));
   return found.sort(byReadingOrder);
 }
 
@@ -504,21 +495,115 @@ function placePanelBesideImage(node: SceneNode) {
   }
 }
 
+let imageNodeCache: SceneNode[] | null = null;
+let docEpoch = 0;
+const NOISE_PROPS = new Set<string>(['annotations', 'pluginData', 'sharedPluginData']);
+let prefetched: { id: string; hash: string; epoch: number; preview: string; context: ReturnType<typeof extractNodeContext> } | null = null;
+let prefetching = false;
+let prefetchTimer: any = null;
+let scrollToken = 0;
+
+figma.on('currentpagechange', () => {
+  imageNodeCache = null;
+  prefetched = null;
+});
+
+function findNextMissing(fromId: string | null): SceneNode | null {
+  const list = missingImages(fromId);
+  const idx = fromId ? list.findIndex(n => n.id === fromId) : -1;
+  for (let i = 1; i <= list.length; i++) {
+    const cand = list[(idx + i + list.length) % list.length];
+    if (cand.id !== fromId) return cand;
+  }
+  return null;
+}
+
+async function exportPreview(node: SceneNode): Promise<string> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const bytes = await node.exportAsync({ format: 'PNG', constraint: { type: 'WIDTH', value: 800 } });
+      const b64 = uint8ArrayToBase64(bytes);
+      if (b64) return b64;
+    } catch (e) {
+      await new Promise(r => setTimeout(r, 180));
+    }
+  }
+  return '';
+}
+
+function takePrefetched(node: SceneNode) {
+  if (!prefetched || prefetched.id !== node.id) return null;
+  const p = prefetched;
+  prefetched = null;
+  return p.epoch === docEpoch && p.hash === imageHashOf(node) ? p : null;
+}
+
+function schedulePrefetch() {
+  clearTimeout(prefetchTimer);
+  prefetchTimer = setTimeout(() => { prefetchNext(); }, 400);
+}
+
+async function prefetchNext() {
+  if (prefetching) return;
+  prefetching = true;
+  try {
+    const sel = figma.currentPage.selection[0];
+    if (!sel) return;
+    const fromId = sel.getPluginData('polly_target_image_id') || sel.id;
+    const next = findNextMissing(fromId);
+    if (!next || (prefetched && prefetched.id === next.id && prefetched.epoch === docEpoch)) return;
+    const epoch = docEpoch;
+    const hash = imageHashOf(next);
+    const preview = await exportPreview(next);
+    if (next.removed || epoch !== docEpoch) return;
+    prefetched = { id: next.id, hash, epoch, preview, context: extractNodeContext(next) };
+  } catch (e) {
+    console.error('Prefetch failed', e);
+  } finally {
+    prefetching = false;
+  }
+}
+
+function easeInOut(t: number): number {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+async function scrollToNode(node: SceneNode): Promise<void> {
+  const b = node.absoluteBoundingBox;
+  if (!b) return;
+  const token = ++scrollToken;
+  const z0 = figma.viewport.zoom;
+  const v = figma.viewport.bounds;
+  const c0 = figma.viewport.center;
+  const pad = 80 / z0;
+  const comfortablyVisible = b.x >= v.x + pad && b.y >= v.y + pad && b.x + b.width <= v.x + v.width - pad && b.y + b.height <= v.y + v.height - pad;
+  if (comfortablyVisible) return;
+
+  const z1 = Math.max(0.02, Math.min(z0, (v.width * z0 - 160) / b.width, (v.height * z0 - 160) / b.height));
+  const c1 = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  const ms = Math.min(900, 300 + Math.hypot(c1.x - c0.x, c1.y - c0.y) * z0 * 0.1);
+  const start = Date.now();
+
+  await new Promise<void>(resolve => {
+    const step = () => {
+      if (token !== scrollToken) return resolve();
+      const t = Math.min(1, (Date.now() - start) / ms);
+      const e = easeInOut(t);
+      figma.viewport.zoom = z0 + (z1 - z0) * e;
+      figma.viewport.center = { x: c0.x + (c1.x - c0.x) * e, y: c0.y + (c1.y - c0.y) * e };
+      if (t < 1) setTimeout(step, 16); else resolve();
+    };
+    step();
+  });
+}
+
 async function goToNextMissing(): Promise<boolean> {
   const sel = figma.currentPage.selection[0];
   let fromId: string | null = sel ? sel.id : null;
   if (sel && sel.getPluginData('polly_target_image_id')) fromId = sel.getPluginData('polly_target_image_id');
 
   const list = missingImages(fromId);
-  const idx = fromId ? list.findIndex(n => n.id === fromId) : -1;
-  let next: SceneNode | null = null;
-  for (let i = 1; i <= list.length; i++) {
-    const cand = list[(idx + i + list.length) % list.length];
-    if (cand.id !== fromId) {
-      next = cand;
-      break;
-    }
-  }
+  const next = findNextMissing(fromId);
 
   if (!next) {
     figma.notify(list.some(n => n.id !== fromId) || (fromId && isUndescribedImage(figma.getNodeById(fromId) as SceneNode))
@@ -531,14 +616,13 @@ async function goToNextMissing(): Promise<boolean> {
 
   focusTargetId = next.id;
   figma.currentPage.selection = [next];
-  bringIntoView(next);
-  showFocusRing(next);
   figma.ui.postMessage({ type: 'PULSE_GENERATE' });
   sendMissingCount();
-  if (followImage) {
-    await new Promise(r => setTimeout(r, 120));
-    placePanelBesideImage(next);
-  }
+  await scrollToNode(next);
+  const cur = figma.currentPage.selection[0];
+  if (next.removed || !cur || cur.id !== next.id) return false;
+  showFocusRing(next);
+  if (followImage) placePanelBesideImage(next);
   return true;
 }
 
@@ -778,11 +862,18 @@ figma.on('documentchange', (event) => {
       const node = (change as any).node;
       if (node && !node.removed && !isPollyNode(node)) {
         lastCreateAt = Date.now();
+        imageNodeCache = null;
+        docEpoch++;
         waitForImageFill(node).then(ok => { if (ok) { resetCopiedAlt(node); checkAndSquawkNewImage(node); } }).catch(e => console.error('Squawk failed', e));
       }
     } else if (change.type === 'PROPERTY_CHANGE') {
       const node = (change as any).node;
       if (!node || node.removed) continue;
+
+      if (!isPollyNode(node) && change.properties.some(p => !NOISE_PROPS.has(p))) {
+        docEpoch++;
+        if (change.properties.includes('fills')) imageNodeCache = null;
+      }
 
       if (!isPollyNode(node) && change.properties.some(p => p === 'x' || p === 'y' || p === 'width' || p === 'height' || p === 'rotation' || p === 'visible')) {
         scheduleOverlaySync();
@@ -1213,7 +1304,7 @@ figma.ui.onmessage = async (msg) => {
         } else {
           sendMissingCount();
         }
-      }, 1500);
+      }, 450);
     } else {
       scheduleOverlaySync();
       setTimeout(() => setCollapsed(true), 1200);

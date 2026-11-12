@@ -497,7 +497,7 @@
         </div>
 
         <button type="button" id="polly-generate-btn" class="polly-btn-primary">
-          Preview and Generate
+          Generate alt text suggestions
         </button>
 
         <div class="polly-standards-text">
@@ -697,6 +697,21 @@
         populateModelDropdown(key, document.getElementById('polly-model-select').value);
       };
 
+      function scrollToTips() {
+        const panel = document.getElementById('polly-main-panel');
+        const tips = document.getElementById('polly-tip-box');
+        const btn = document.getElementById('polly-generate-btn');
+        const pinned = document.getElementById('polly-stadium-container');
+        const pinnedHeight = pinned && pinned.style.display !== 'none' ? pinned.offsetHeight : 0;
+        const panelRect = panel.getBoundingClientRect();
+        const needed = tips.getBoundingClientRect().bottom - panelRect.bottom + 14;
+        const allowed = btn.getBoundingClientRect().top - (panelRect.top + pinnedHeight) - 8;
+        const delta = Math.min(needed, allowed);
+        if (delta <= 0) return;
+        const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        panel.scrollBy({ top: delta, behavior: reduceMotion ? 'auto' : 'smooth' });
+      }
+
       function startTipRotator() {
         const box = document.getElementById('polly-tip-box');
         const msg = document.getElementById('polly-tip-msg');
@@ -792,6 +807,7 @@
         generatingNodeId = currentNode.nodeId;
         genBtn.disabled = true;
         startTipRotator();
+        requestAnimationFrame(scrollToTips);
 
         parent.postMessage({ pluginMessage: { type: 'REQUEST_IMAGE_DATA', nodeId: currentNode.nodeId } }, '*');
       };
@@ -889,7 +905,7 @@
             };
 
             const genBtn = document.getElementById('polly-generate-btn');
-            genBtn.textContent = 'Preview and Refine';
+            genBtn.textContent = 'Refine alt text suggestion';
             document.getElementById('polly-main-panel').scrollTo({ top: 0, behavior: 'smooth' });
 
             parent.postMessage({
@@ -1056,7 +1072,7 @@
           stopTipRotator();
           const genBtn = document.getElementById('polly-generate-btn');
           generating = false;
-          genBtn.textContent = currentNode && currentNode.existingAlt ? 'Preview and Refine' : 'Preview and Generate';
+          genBtn.textContent = currentNode && currentNode.existingAlt ? 'Refine alt text suggestion' : 'Generate alt text suggestions';
           syncGenerateButton();
         }
       }
@@ -1304,7 +1320,7 @@
           }
 
           const genBtn = document.getElementById('polly-generate-btn');
-          genBtn.textContent = currentNode.existingAlt ? 'Preview and Refine' : 'Preview and Generate';
+          genBtn.textContent = currentNode.existingAlt ? 'Refine alt text suggestion' : 'Generate alt text suggestions';
 
           document.getElementById('polly-deco-check').checked = currentNode.isDecorative;
           renderContextPreview(currentNode.context);
@@ -1352,7 +1368,7 @@
           } else {
             generating = false;
             stopTipRotator();
-            document.getElementById('polly-generate-btn').textContent = currentNode && currentNode.existingAlt ? 'Preview and Refine' : 'Preview and Generate';
+            document.getElementById('polly-generate-btn').textContent = currentNode && currentNode.existingAlt ? 'Refine alt text suggestion' : 'Generate alt text suggestions';
             syncGenerateButton();
           }
         }
@@ -1363,7 +1379,7 @@
           generating = false;
           const genBtn = document.getElementById('polly-generate-btn');
           genBtn.disabled = false;
-          genBtn.textContent = 'Preview and Generate';
+          genBtn.textContent = 'Generate alt text suggestions';
         }
       };
 
